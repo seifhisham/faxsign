@@ -164,8 +164,10 @@ function resetAllTabs() {
     // Clear all dynamic content
     clearAllContent();
 
-    // Hide admin content only
-    hideAllAdminContent();
+    // Hide admin content only for non-admin users
+    if (!currentUser || currentUser.role !== 'admin') {
+        hideAllAdminContent();
+    }
 
     // Reset any global variables
     window.availableUsers = null;
@@ -818,6 +820,9 @@ async function loadUsersForManagement() {
 
 function displayUsersForManagement(users) {
     const usersList = document.getElementById('usersList');
+    if (usersList) {
+        usersList.style.display = 'block';
+    }
     
     if (users.length === 0) {
         usersList.innerHTML = '<div class="loading">No users found</div>';
@@ -953,6 +958,11 @@ async function updateUserDepartment(userId) {
 // Department Management Functions (Admin Only)
 async function loadDepartmentsForManagement() {
     try {
+        // Ensure admin form is visible when managing departments
+        const addForm = document.getElementById('addDepartmentForm');
+        if (addForm) {
+            addForm.style.display = 'block';
+        }
         const response = await fetch('/api/departments', {
             headers: {
                 'Authorization': `Bearer ${currentToken}`
@@ -972,7 +982,10 @@ async function loadDepartmentsForManagement() {
 
 function displayDepartmentsForManagement(departments) {
     const departmentsList = document.getElementById('departmentsList');
-    
+    if (departmentsList) {
+        departmentsList.style.display = 'block';
+    }
+
     if (departments.length === 0) {
         departmentsList.innerHTML = '<div class="loading">No departments found</div>';
         return;
