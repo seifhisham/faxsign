@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FaxSign - Fax Signature Management</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+        }
+
+        .header h1 {
+            color: #4a5568;
+            text-align: center;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            text-align: center;
+            color: #718096;
+        }
+
+        .login-container {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 40px;
+            max-width: 400px;
+            margin: 50px auto;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            color: #4a5568;
+            font-weight: 500;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s ease;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 500;
+            transition: transform 0.2s ease;
+            width: 100%;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+        }
+
+        .btn-secondary {
+            background: #718096;
+        }
+
+        .main-content {
+            display: none;
+        }
+
+        .nav-tabs {
+            display: flex;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            margin-bottom: 20px;
+            overflow: hidden;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+        }
+
+        .nav-tab {
+            flex: 1;
+            padding: 15px 20px;
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 500;
+            color: #718096;
+            transition: all 0.3s ease;
+        }
+
+        .nav-tab.active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .tab-content {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .card {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            border-left: 4px solid #667eea;
+        }
+
+        .card h3 {
+            color: #4a5568;
+            margin-bottom: 10px;
+        }
+
+        .card p {
+            color: #718096;
+            margin-bottom: 5px;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 500;
+            text-transform: uppercase;
+        }
+
+        .status-pending {
+            background: #fef5e7;
+            color: #d69e2e;
+        }
+
+        .status-signed {
+            background: #f0fff4;
+            color: #38a169;
+        }
+
+        .status-completed {
+            background: #ebf8ff;
+            color: #3182ce;
+        }
+
+        .signature-canvas {
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            background: white;
+            cursor: crosshair;
+        }
+
+        .user-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .logout-btn {
+            background: #e53e3e;
+            color: white;
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .file-upload {
+            border: 2px dashed #cbd5e0;
+            border-radius: 8px;
+            padding: 40px;
+            text-align: center;
+            cursor: pointer;
+            transition: border-color 0.3s ease;
+        }
+
+        .file-upload:hover {
+            border-color: #667eea;
+        }
+
+        .file-upload input {
+            display: none;
+        }
+
+        .signer-list {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .signer-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            margin-bottom: 10px;
+        }
+
+        .error {
+            background: #fed7d7;
+            color: #c53030;
+            padding: 10px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+        }
+
+        .success {
+            background: #c6f6d5;
+            color: #2f855a;
+            padding: 10px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #718096;
+        }
+
+        .user-card {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 15px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            border-left: 4px solid #667eea;
+        }
+
+        .user-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .user-info {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .user-name {
+            font-weight: 600;
+            color: #4a5568;
+            font-size: 18px;
+        }
+
+        .user-details {
+            color: #718096;
+            font-size: 14px;
+        }
+
+        .role-selector {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .role-selector select {
+            padding: 8px 12px;
+            border: 2px solid #e2e8f0;
+            border-radius: 6px;
+            font-size: 14px;
+            background: white;
+        }
+
+        .role-selector select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .role-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 500;
+            text-transform: uppercase;
+        }
+
+        .role-admin {
+            background: #fed7d7;
+            color: #c53030;
+        }
+
+        .role-manager {
+            background: #fef5e7;
+            color: #d69e2e;
+        }
+
+        .role-user {
+            background: #ebf8ff;
+            color: #3182ce;
+        }
+
+        .role-faxes {
+            background: #e6fffa;
+            color: #319795;
+        }
+
+        .update-btn {
+            background: #38a169;
+            color: white;
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background-color 0.2s ease;
+        }
+
+        .update-btn:hover {
+            background: #2f855a;
+        }
+
+        .update-btn:disabled {
+            background: #cbd5e0;
+            cursor: not-allowed;
+        }
+
+        .department-card {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 15px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            border-left: 4px solid #38a169;
+        }
+
+        .department-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .department-name {
+            font-weight: 600;
+            color: #4a5568;
+            font-size: 18px;
+        }
+
+        .department-actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        .edit-btn {
+            background: #3182ce;
+            color: white;
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background-color 0.2s ease;
+        }
+
+        .edit-btn:hover {
+            background: #2c5aa0;
+        }
+
+        .delete-btn {
+            background: #e53e3e;
+            color: white;
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background-color 0.2s ease;
+        }
+
+        .delete-btn:hover {
+            background: #c53030;
+        }
+
+        .delete-btn:disabled {
+            background: #cbd5e0;
+            cursor: not-allowed;
+        }
+
+        .edit-form {
+            display: none;
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #e2e8f0;
+        }
+
+        .edit-form.active {
+            display: block;
+        }
+
+        .edit-form input {
+            margin-right: 10px;
+        }
+
+        .user-count {
+            color: #718096;
+            font-size: 14px;
+            margin-top: 5px;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 10px;
+            }
+            
+            .nav-tabs {
+                flex-direction: column;
+            }
+            
+            .nav-tab {
+                border-bottom: 1px solid #e2e8f0;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Login Form -->
+        <div id="loginForm" class="login-container">
+            <h2 style="text-align: center; margin-bottom: 30px; color: #4a5568;">FaxSign Login</h2>
+            <form id="loginFormElement">
+                <div class="form-group">
+                    <label for="username">Username</label>
+                    <input type="text" id="username" name="username" required>
+                </div>
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" name="password" required>
+                </div>
+                <button type="submit" class="btn">Login</button>
+            </form>
+            <div id="loginError" class="error" style="display: none;"></div>
+            <div style="text-align: center; margin-top: 20px;">
+                <p style="color: #718096; margin-bottom: 10px;">Don't have an account?</p>
+                <a href="/register" style="color: #667eea; text-decoration: none; font-weight: 500;">Create Account</a>
+            </div>
+        </div>
+
+        <!-- Main Application -->
+        <div id="mainApp" class="main-content">
+            <div class="header">
+                <h1><i class="fas fa-fax"></i> FaxSign</h1>
+                <p>Fax Signature Management System</p>
+                <div class="user-info">
+                    <span>Welcome, <span id="userName"></span></span>
+                    <button class="logout-btn" onclick="logout()">Logout</button>
+                </div>
+            </div>
+
+            <!-- Navigation Tabs -->
+            <div class="nav-tabs">
+                <button class="nav-tab active" data-tab="faxes" onclick="showTab('faxes', this)">Faxes</button>
+                <button class="nav-tab" data-tab="workflows" onclick="showTab('workflows', this)">Signature Workflows</button>
+                <button class="nav-tab" data-tab="upload" onclick="showTab('upload', this)">Upload Fax</button>
+                <button class="nav-tab" data-tab="create-workflow" onclick="showTab('create-workflow', this)">Create Workflow</button>
+                <button class="nav-tab admin-only" data-tab="user-management" onclick="showTab('user-management', this)" style="display: none;">User Management</button>
+                <button class="nav-tab admin-only" data-tab="department-management" onclick="showTab('department-management', this)" style="display: none;">Department Management</button>
+            </div>
+
+            <!-- Faxes Tab -->
+            <div id="faxes" class="tab-content active">
+                <h2>Received Faxes</h2>
+                <div id="faxesList"></div>
+            </div>
+
+            <!-- Workflows Tab -->
+            <div id="workflows" class="tab-content">
+                <h2>Signature Workflows</h2>
+                <div id="workflowsList"></div>
+            </div>
+
+            <!-- Upload Fax Tab -->
+            <div id="upload" class="tab-content">
+                <h2>Upload New Fax</h2>
+                <form id="uploadForm">
+                    <div class="form-group">
+                        <label for="faxNumber">Fax Number</label>
+                        <input type="text" id="faxNumber" name="faxNumber" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="senderName">Sender Name</label>
+                        <input type="text" id="senderName" name="senderName" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Fax Document</label>
+                        <div class="file-upload" onclick="document.getElementById('faxFile').click()">
+                            <i class="fas fa-cloud-upload-alt" style="font-size: 48px; color: #cbd5e0; margin-bottom: 10px;"></i>
+                            <p>Click to upload fax document (PDF, JPEG, PNG, TIFF)</p>
+                            <input type="file" id="faxFile" name="fax" accept=".pdf,.jpg,.jpeg,.png,.tiff" required>
+                        <span id="selectedFileName" style="display:block; margin-top:8px; color:#38a169;"></span>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn">Upload Fax</button>
+                </form>
+                <div id="uploadMessage"></div>
+            </div>
+
+            <!-- Create Workflow Tab -->
+            <div id="create-workflow" class="tab-content">
+                <h2>Create Signature Workflow</h2>
+                <form id="workflowForm">
+                    <div class="form-group">
+                        <label for="workflowFax">Select Fax</label>
+                        <select id="workflowFax" name="workflowFax" required>
+                            <option value="">Choose a fax...</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="workflowName">Workflow Name</label>
+                        <input type="text" id="workflowName" name="workflowName" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Add Signers</label>
+                        <div id="signersList" class="signer-list">
+                            <!-- Signers will be added here -->
+                        </div>
+                        <button type="button" class="btn btn-secondary" onclick="addSigner()">Add Signer</button>
+                    </div>
+                    <button type="submit" class="btn">Create Workflow</button>
+                </form>
+                <div id="workflowMessage"></div>
+            </div>
+
+            <!-- User Management Tab (Admin Only) -->
+            <div id="user-management" class="tab-content">
+                <h2>User Management</h2>
+                <div class="admin-warning" style="background: #fef5e7; color: #d69e2e; padding: 15px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #d69e2e;">
+                    <i class="fas fa-shield-alt"></i> <strong>Admin Panel:</strong> Only administrators can modify user roles and permissions.
+                </div>
+                <div id="usersList"></div>
+            </div>
+
+            <!-- Department Management Tab (Admin Only) -->
+            <div id="department-management" class="tab-content">
+                <h2>Department Management</h2>
+                <div class="admin-warning" style="background: #fef5e7; color: #d69e2e; padding: 15px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #d69e2e;">
+                    <i class="fas fa-building"></i> <strong>Admin Panel:</strong> Only administrators can create, edit, and delete departments.
+                </div>
+                
+                <!-- Add New Department Form -->
+                <div class="card" style="margin-bottom: 30px;">
+                    <h3>Add New Department</h3>
+                    <form id="addDepartmentForm">
+                        <div class="form-group">
+                            <label for="newDepartmentName">Department Name</label>
+                            <input type="text" id="newDepartmentName" name="newDepartmentName" required placeholder="Enter department name">
+                        </div>
+                        <button type="submit" class="btn">Create Department</button>
+                    </form>
+                    <div id="addDepartmentMessage"></div>
+                </div>
+                
+                <!-- Departments List -->
+                <div id="departmentsList"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Signature Modal -->
+    <div id="signatureModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000;">
+        <div style="background: white; margin: 50px auto; padding: 30px; border-radius: 15px; max-width: 600px;">
+            <h3>Sign Document</h3>
+            <canvas id="signatureCanvas" class="signature-canvas" width="500" height="200"></canvas>
+            <div style="margin-top: 20px;">
+                <button class="btn btn-secondary" onclick="clearSignature()">Clear</button>
+                <button class="btn" onclick="submitSignature()">Sign Document</button>
+                <button class="btn btn-secondary" onclick="closeSignatureModal()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
