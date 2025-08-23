@@ -130,10 +130,13 @@ db.serialize(() => {
     }
 });
 
+// Resolve uploads directory as absolute path relative to server file
+const uploadsAbs = path.resolve(__dirname, config.UPLOAD_DIR);
+
 // File upload configuration
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
-        cb(null, config.UPLOAD_DIR);
+        cb(null, uploadsAbs);
     },
     filename: (req, file, cb) => {
         const uniqueName = `${Date.now()}-${uuidv4()}-${file.originalname}`;
@@ -220,6 +223,52 @@ app.post('/api/auth/login', (req, res) => {
     });
 });
 
+// Serve fax file (authenticated, with access control)
+app.get('/api/faxes/:id/file', authenticateToken, (req, res) => {
+    const faxId = parseInt(req.params.id, 10);
+    db.get(
+        `SELECT f.file_path, f.assigned_department_id
+         FROM faxes f
+         WHERE f.id = ?`,
+        [faxId],
+        (err, fax) => {
+            if (err) {
+                return res.status(500).json({ error: 'Database error' });
+            }
+            if (!fax) {
+                return res.status(404).json({ error: 'Fax not found' });
+            }
+            if (!isPrivileged(req.user) && (fax.assigned_department_id !== req.user.department_id)) {
+                return res.status(403).json({ error: 'Access denied' });
+            }
+
+            // Ensure the file is served from the configured uploads directory
+            const fs = require('fs');
+            const uploadsRoot = uploadsAbs;
+            // Preferred path: uploadsRoot + basename (works whether DB stores filename or full path)
+            const preferredPath = path.join(uploadsRoot, path.basename(fax.file_path || ''));
+            console.log('[FAX FILE] id=%s stored=%s uploadsRoot=%s preferredPath=%s', faxId, fax.file_path, uploadsRoot, preferredPath);
+            if (preferredPath && fs.existsSync(preferredPath)) {
+                return res.sendFile(preferredPath);
+            }
+
+            // Fallback: try the stored path with safety checks
+            let resolvedPath = path.resolve(fax.file_path || '');
+            const relativeToUploads = path.relative(uploadsRoot, resolvedPath);
+            if (relativeToUploads.startsWith('..') || path.isAbsolute(relativeToUploads)) {
+                console.warn('[FAX FILE] Stored path outside uploads directory', { uploadsRoot, stored: fax.file_path, resolvedPath });
+                return res.status(404).json({ error: 'File not found' });
+            }
+            if (!fs.existsSync(resolvedPath)) {
+                console.warn('[FAX FILE] Not found on disk (fallback)', { resolvedPath });
+                return res.status(404).json({ error: 'File not found' });
+            }
+            console.log('[FAX FILE] Sending fallback path', { resolvedPath });
+            return res.sendFile(resolvedPath);
+        }
+    );
+});
+
 app.post('/api/auth/register', (req, res) => {
     const { username, email, password, full_name } = req.body;
     const hashedPassword = bcrypt.hashSync(password, config.PASSWORD_SALT_ROUNDS);
@@ -247,7 +296,8 @@ app.post('/api/faxes/upload', authenticateToken, upload.single('fax'), (req, res
         return res.status(403).json({ error: 'Only users with faxes, admin, or manager role can upload faxes' });
     }
     const { fax_number, sender_name } = req.body;
-    const file_path = req.file.path;
+    // Store only the filename to avoid absolute/relative path inconsistencies
+    const file_path = req.file.filename;
 
     db.run(
         'INSERT INTO faxes (fax_number, sender_name, file_path, uploaded_by, assigned_department_id) VALUES (?, ?, ?, ?, ?)',
@@ -650,8 +700,8 @@ app.use((err, req, res, next) => {
 
 // Create uploads directory if it doesn't exist
 const fs = require('fs');
-if (!fs.existsSync(config.UPLOAD_DIR)) {
-    fs.mkdirSync(config.UPLOAD_DIR);
+if (!fs.existsSync(uploadsAbs)) {
+    fs.mkdirSync(uploadsAbs, { recursive: true });
 }
 
 app.listen(PORT, () => {

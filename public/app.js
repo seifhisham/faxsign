@@ -26,6 +26,61 @@ document.addEventListener('DOMContentLoaded', function() {
     setupSignatureCanvas();
 });
 
+// Preview cache to avoid refetching (global)
+const faxPreviewCache = new Map(); // faxId -> { url, type }
+
+async function loadFaxPreview(faxId) {
+    try {
+        // If cached, render from cache
+        if (faxPreviewCache.has(faxId)) {
+            renderPreview(faxId, faxPreviewCache.get(faxId));
+            return;
+        }
+        const res = await fetch(`/api/faxes/${faxId}/file`, {
+            headers: { 'Authorization': `Bearer ${currentToken}` }
+        });
+        const container = document.getElementById(`fax-preview-${faxId}`);
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            if (container) container.innerHTML = `<div style="padding:16px; color:#e53e3e;">${err.error || 'Failed to load preview'}</div>`;
+            return;
+        }
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const meta = { url, type: blob.type || '' };
+        faxPreviewCache.set(faxId, meta);
+        renderPreview(faxId, meta);
+    } catch (e) {
+        const container = document.getElementById(`fax-preview-${faxId}`);
+        if (container) container.innerHTML = `<div style="padding:16px; color:#e53e3e;">Failed to load preview</div>`;
+    }
+}
+
+function renderPreview(faxId, meta) {
+    const container = document.getElementById(`fax-preview-${faxId}`);
+    if (!container) return;
+    const isImage = meta.type && meta.type.startsWith('image/');
+    // Compact preview: image or small iframe
+    if (isImage) {
+        container.innerHTML = `<img src="${meta.url}" alt="Fax preview" style="display:block; width:100%; max-height:220px; object-fit:contain; background:white;" />`;
+    } else {
+        container.innerHTML = `<iframe src="${meta.url}" title="Fax preview" style="width:100%; height:220px; border:0; background:white;"></iframe>`;
+    }
+}
+
+function maximizeFax(faxId) {
+    // Use preview cache if available, otherwise fallback to existing viewFax fetch
+    const meta = faxPreviewCache.get(faxId);
+    if (meta && meta.url) {
+        const frame = document.getElementById('faxViewerFrame');
+        frame.src = meta.url;
+        document.getElementById('faxViewerModal').style.display = 'block';
+        return;
+    }
+    // Not cached yet, fetch via viewFax
+    viewFax(faxId);
+}
+
 // Setup event listeners
 function setupEventListeners() {
     // Login form
@@ -374,9 +429,20 @@ async function loadFaxes() {
         if (response.ok) {
             const faxes = await response.json();
             displayFaxes(faxes);
+        } else {
+            const faxesList = document.getElementById('faxesList');
+            let data = null;
+            try { data = await response.json(); } catch (_) {}
+            if (faxesList) {
+                faxesList.innerHTML = `<div class="error">Failed to load faxes: ${data && data.error ? data.error : response.status}</div>`;
+            }
         }
     } catch (error) {
         console.error('Error loading faxes:', error);
+        const faxesList = document.getElementById('faxesList');
+        if (faxesList) {
+            faxesList.innerHTML = `<div class="error">Network error while loading faxes</div>`;
+        }
     }
 }
 
@@ -411,9 +477,15 @@ function displayFaxes(faxes) {
             <p><strong>Uploaded by:</strong> ${fax.uploaded_by_name}</p>
             <p><strong>${assignedLabel}</strong></p>
             <span class="status-badge status-${fax.status}">${fax.status}</span>
+            <div id="fax-preview-${fax.id}" class="fax-preview" style="margin-top:12px; border:1px solid #e2e8f0; border-radius:8px; overflow:hidden; background:#f8fafc; display:flex; align-items:center; justify-content:center; cursor:pointer;" onclick="maximizeFax(${fax.id})">
+                <div style="padding:16px; color:#718096; font-size:14px;">Loading preview...</div>
+            </div>
             ${assignControl}
         </div>`;
     }).join('');
+
+    // After rendering cards, load previews
+    faxes.forEach(f => loadFaxPreview(f.id));
 }
 
 async function handleUpload(e) {
@@ -716,6 +788,44 @@ function openSignatureModal(workflowId) {
 function closeSignatureModal() {
     document.getElementById('signatureModal').style.display = 'none';
     currentWorkflowId = null;
+}
+
+// Fax Viewer
+let currentFaxObjectUrl = null;
+async function viewFax(faxId) {
+    try {
+        const res = await fetch(`/api/faxes/${faxId}/file`, {
+            headers: { 'Authorization': `Bearer ${currentToken}` }
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            alert(err.error || 'Failed to open fax');
+            return;
+        }
+        const blob = await res.blob();
+        // Revoke previous URL if any
+        if (currentFaxObjectUrl) {
+            URL.revokeObjectURL(currentFaxObjectUrl);
+            currentFaxObjectUrl = null;
+        }
+        currentFaxObjectUrl = URL.createObjectURL(blob);
+        const frame = document.getElementById('faxViewerFrame');
+        frame.src = currentFaxObjectUrl;
+        document.getElementById('faxViewerModal').style.display = 'block';
+    } catch (e) {
+        alert('Failed to open fax');
+    }
+}
+
+function closeFaxViewer() {
+    const modal = document.getElementById('faxViewerModal');
+    const frame = document.getElementById('faxViewerFrame');
+    modal.style.display = 'none';
+    frame.src = 'about:blank';
+    if (currentFaxObjectUrl) {
+        URL.revokeObjectURL(currentFaxObjectUrl);
+        currentFaxObjectUrl = null;
+    }
 }
 
 function startDrawing(e) {
