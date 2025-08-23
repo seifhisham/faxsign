@@ -413,6 +413,10 @@ document.addEventListener('DOMContentLoaded', function() {
 async function loadInitialData() {
     // Always load departments for admin user management
     await loadDepartments();
+    // Load users upfront only if manager (manages visibility)
+    if (currentUser && currentUser.role === 'manager') {
+        await loadUsers();
+    }
     await loadFaxes();
     await loadWorkflows();
 }
@@ -456,6 +460,8 @@ function displayFaxes(faxes) {
     
     faxesList.innerHTML = faxes.map(fax => {
         const assignedLabel = fax.assigned_department_name ? `Assigned to: ${fax.assigned_department_name}` : 'Unassigned';
+        const isRestricted = (fax.permissions_count || 0) > 0;
+        const visibilityLabel = isRestricted ? 'Restricted: Specific users only' : 'Visible to department';
         const assignControl = (isCurrentUserPrivileged && availableDepartments.length)
             ? `
             <div style="margin-top:10px;">
@@ -466,6 +472,27 @@ function displayFaxes(faxes) {
                         ${availableDepartments.map(d => `<option value="${d.id}" ${fax.assigned_department_name===d.name?'selected':''}>${d.name}</option>`).join('')}
                     </select>
                     <button class="btn btn-secondary" onclick="assignFaxDepartment(${fax.id})">Assign</button>
+                </div>
+            </div>`
+            : '';
+        const manageVisibility = (currentUser && currentUser.role === 'manager')
+            ? `
+            <div style="margin-top:10px;">
+                <label style="font-size:12px;color:#718096;">Visibility</label>
+                <div>
+                    <span class="status-badge" style="background:${isRestricted?'#ebf8ff':'#f0fff4'}; color:${isRestricted?'#3182ce':'#38a169'};">${visibilityLabel}</span>
+                </div>
+                <div style="margin-top:8px;">
+                    <button class="btn btn-secondary" onclick="toggleVisibilityPanel(${fax.id})">Manage visibility</button>
+                </div>
+                <div id="vis-panel-${fax.id}" style="display:none; margin-top:10px; padding:10px; border:1px solid #e2e8f0; border-radius:8px;">
+                    <div id="vis-users-${fax.id}" class="signer-list" style="max-height:200px; overflow:auto;">
+                        <div class="loading">Loading users...</div>
+                    </div>
+                    <div style="margin-top:10px; display:flex; gap:8px;">
+                        <button class="btn" onclick="saveFaxVisibility(${fax.id})">Save</button>
+                        <button class="btn btn-secondary" onclick="document.getElementById('vis-panel-${fax.id}').style.display='none'">Cancel</button>
+                    </div>
                 </div>
             </div>`
             : '';
@@ -481,11 +508,78 @@ function displayFaxes(faxes) {
                 <div style="padding:16px; color:#718096; font-size:14px;">Loading preview...</div>
             </div>
             ${assignControl}
+            ${manageVisibility}
         </div>`;
     }).join('');
 
     // After rendering cards, load previews
     faxes.forEach(f => loadFaxPreview(f.id));
+}
+
+// Manage visibility panel logic (admin/manager)
+async function toggleVisibilityPanel(faxId) {
+    const panel = document.getElementById(`vis-panel-${faxId}`);
+    const usersBox = document.getElementById(`vis-users-${faxId}`);
+    if (!panel || !usersBox) return;
+    const willShow = panel.style.display === 'none' || panel.style.display === '';
+    if (willShow) {
+        // Ensure users are loaded
+        if (!window.availableUsers) {
+            await loadUsers();
+        }
+        // Fetch current permissions
+        let permitted = [];
+        try {
+            const res = await fetch(`/api/faxes/${faxId}/permissions`, { headers: { 'Authorization': `Bearer ${currentToken}` } });
+            if (res.ok) {
+                permitted = await res.json();
+            }
+        } catch (e) { /* ignore */ }
+        renderVisibilityPanel(faxId, permitted.map(u => u.id));
+        panel.style.display = 'block';
+    } else {
+        panel.style.display = 'none';
+    }
+}
+
+function renderVisibilityPanel(faxId, permittedIds) {
+    const usersBox = document.getElementById(`vis-users-${faxId}`);
+    if (!usersBox) return;
+    const users = (window.availableUsers || []).filter(u => u.role !== 'admin' && u.role !== 'manager');
+    if (!users.length) {
+        usersBox.innerHTML = '<div class="loading">No users to select</div>';
+        return;
+    }
+    usersBox.innerHTML = users.map(u => {
+        const checked = permittedIds && permittedIds.includes(u.id) ? 'checked' : '';
+        return `
+            <label style="display:flex; align-items:center; gap:8px; padding:6px 0;">
+                <input type="checkbox" class="vis-user-${faxId}" value="${u.id}" ${checked} />
+                <span>${u.full_name} <span style="color:#718096; font-size:12px;">(${u.email})</span></span>
+            </label>
+        `;
+    }).join('');
+}
+
+async function saveFaxVisibility(faxId) {
+    const checkboxes = Array.from(document.querySelectorAll(`.vis-user-${faxId}`));
+    const selected = checkboxes.filter(cb => cb.checked).map(cb => parseInt(cb.value));
+    try {
+        const res = await fetch(`/api/faxes/${faxId}/permissions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentToken}` },
+            body: JSON.stringify({ user_ids: selected })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            alert(data.error || 'Failed to save visibility');
+            return;
+        }
+        // Refresh list to update badge
+        await loadFaxes();
+    } catch (e) {
+        alert('Failed to save visibility');
+    }
 }
 
 async function handleUpload(e) {
@@ -653,7 +747,8 @@ async function loadFaxesForWorkflow() {
 
 async function loadUsers() {
     try {
-        const response = await fetch('/api/users', {
+        const url = (currentUser && currentUser.role === 'manager') ? '/api/users/basic' : '/api/users';
+        const response = await fetch(url, {
             headers: {
                 'Authorization': `Bearer ${currentToken}`
             }

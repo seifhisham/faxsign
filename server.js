@@ -73,6 +73,16 @@ db.serialize(() => {
         FOREIGN KEY (user_id) REFERENCES users (id)
     )`);
 
+    // Fax visibility permissions (per-fax allowed users)
+    db.run(`CREATE TABLE IF NOT EXISTS fax_permissions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        fax_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        UNIQUE(fax_id, user_id),
+        FOREIGN KEY (fax_id) REFERENCES faxes (id),
+        FOREIGN KEY (user_id) REFERENCES users (id)
+    )`);
+
     // Create default admin user
     const adminPassword = bcrypt.hashSync(config.DEFAULT_ADMIN.password, config.PASSWORD_SALT_ROUNDS);
     db.run(`INSERT OR IGNORE INTO users (username, email, password, full_name, role) 
@@ -227,10 +237,12 @@ app.post('/api/auth/login', (req, res) => {
 app.get('/api/faxes/:id/file', authenticateToken, (req, res) => {
     const faxId = parseInt(req.params.id, 10);
     db.get(
-        `SELECT f.file_path, f.assigned_department_id
+        `SELECT f.file_path, f.assigned_department_id,
+                (SELECT COUNT(*) FROM fax_permissions fp WHERE fp.fax_id = f.id) as permissions_count,
+                EXISTS(SELECT 1 FROM fax_permissions fp2 WHERE fp2.fax_id = f.id AND fp2.user_id = ?) as is_permitted
          FROM faxes f
          WHERE f.id = ?`,
-        [faxId],
+        [req.user.id, faxId],
         (err, fax) => {
             if (err) {
                 return res.status(500).json({ error: 'Database error' });
@@ -238,8 +250,12 @@ app.get('/api/faxes/:id/file', authenticateToken, (req, res) => {
             if (!fax) {
                 return res.status(404).json({ error: 'Fax not found' });
             }
-            if (!isPrivileged(req.user) && (fax.assigned_department_id !== req.user.department_id)) {
-                return res.status(403).json({ error: 'Access denied' });
+            if (!isPrivileged(req.user)) {
+                const hasExplicit = fax.permissions_count > 0;
+                const sameDept = fax.assigned_department_id === req.user.department_id;
+                if ((hasExplicit && !fax.is_permitted) || (!hasExplicit && !sameDept)) {
+                    return res.status(403).json({ error: 'Access denied' });
+                }
             }
 
             // Ensure the file is served from the configured uploads directory
@@ -312,13 +328,24 @@ app.post('/api/faxes/upload', authenticateToken, upload.single('fax'), (req, res
 });
 
 app.get('/api/faxes', authenticateToken, (req, res) => {
+    // Privileged users see all faxes. Non-privileged see:
+    // - faxes with no explicit permissions AND assigned to their department, OR
+    // - faxes where they are explicitly permitted via fax_permissions
+    const isPriv = (req.user.role === 'admin' || req.user.role === 'manager' || req.user.role === 'faxes');
     const params = [];
     let whereClause = '';
-    if (!(req.user.role === 'faxes' || req.user.role === 'admin' || req.user.role === 'manager')) {
-        whereClause = 'WHERE f.assigned_department_id = ?';
-        params.push(req.user.department_id || -1);
+    if (!isPriv) {
+        whereClause = `WHERE (
+            (SELECT COUNT(*) FROM fax_permissions fp WHERE fp.fax_id = f.id) = 0 AND f.assigned_department_id = ?
+        ) OR EXISTS (
+            SELECT 1 FROM fax_permissions fp2 WHERE fp2.fax_id = f.id AND fp2.user_id = ?
+        )`;
+        params.push(req.user.department_id || -1, req.user.id);
     }
-    const sql = `SELECT f.*, u.full_name as uploaded_by_name, d.name as assigned_department_name
+    const sql = `SELECT f.*, 
+                        u.full_name as uploaded_by_name, 
+                        d.name as assigned_department_name,
+                        (SELECT COUNT(*) FROM fax_permissions fp WHERE fp.fax_id = f.id) as permissions_count
                  FROM faxes f
                  LEFT JOIN users u ON f.uploaded_by = u.id
                  LEFT JOIN departments d ON f.assigned_department_id = d.id
@@ -333,13 +360,16 @@ app.get('/api/faxes', authenticateToken, (req, res) => {
 });
 
 app.get('/api/faxes/:id', authenticateToken, (req, res) => {
+    const faxId = parseInt(req.params.id, 10);
     db.get(
-        `SELECT f.*, u.full_name as uploaded_by_name, d.name as assigned_department_name
+        `SELECT f.*, u.full_name as uploaded_by_name, d.name as assigned_department_name,
+                (SELECT COUNT(*) FROM fax_permissions fp WHERE fp.fax_id = f.id) as permissions_count,
+                EXISTS(SELECT 1 FROM fax_permissions fp2 WHERE fp2.fax_id = f.id AND fp2.user_id = ?) as is_permitted
          FROM faxes f 
          LEFT JOIN users u ON f.uploaded_by = u.id 
          LEFT JOIN departments d ON f.assigned_department_id = d.id
          WHERE f.id = ?`,
-        [req.params.id],
+        [req.user.id, faxId],
         (err, fax) => {
             if (err) {
                 return res.status(500).json({ error: 'Database error' });
@@ -347,17 +377,90 @@ app.get('/api/faxes/:id', authenticateToken, (req, res) => {
             if (!fax) {
                 return res.status(404).json({ error: 'Fax not found' });
             }
-            if (!isPrivileged(req.user) && (fax.assigned_department_id !== req.user.department_id)) {
-                return res.status(403).json({ error: 'Access denied' });
+            if (!isPrivileged(req.user)) {
+                const hasExplicit = fax.permissions_count > 0;
+                const sameDept = fax.assigned_department_id === req.user.department_id;
+                if ((hasExplicit && !fax.is_permitted) || (!hasExplicit && !sameDept)) {
+                    return res.status(403).json({ error: 'Access denied' });
+                }
             }
             res.json(fax);
         }
     );
 });
 
+// Fax visibility management (manager-only)
+app.get('/api/faxes/:id/permissions', authenticateToken, (req, res) => {
+    if (!(req.user && req.user.role === 'manager')) {
+        return res.status(403).json({ error: 'Only managers can manage visibility' });
+    }
+    const faxId = parseInt(req.params.id, 10);
+    db.all(`SELECT u.id, u.full_name, u.email, u.role
+            FROM fax_permissions fp
+            JOIN users u ON u.id = fp.user_id
+            WHERE fp.fax_id = ?
+            ORDER BY u.full_name`, [faxId], (err, rows) => {
+        if (err) {
+            return res.status(500).json({ error: 'Database error' });
+        }
+        res.json(rows);
+    });
+});
+
+app.post('/api/faxes/:id/permissions', authenticateToken, (req, res) => {
+    if (!(req.user && req.user.role === 'manager')) {
+        return res.status(403).json({ error: 'Only managers can manage visibility' });
+    }
+    const faxId = parseInt(req.params.id, 10);
+    const userIds = Array.isArray(req.body.user_ids) ? req.body.user_ids.map(Number).filter(n => Number.isInteger(n)) : [];
+
+    db.serialize(() => {
+        db.run('BEGIN TRANSACTION');
+        db.run('DELETE FROM fax_permissions WHERE fax_id = ?', [faxId], (delErr) => {
+            if (delErr) {
+                db.run('ROLLBACK');
+                return res.status(500).json({ error: 'Database error' });
+            }
+            if (userIds.length === 0) {
+                db.run('COMMIT');
+                return res.json({ message: 'Visibility updated (now department-based)' });
+            }
+            let completed = 0;
+            let hasError = false;
+            userIds.forEach((uid) => {
+                db.run('INSERT OR IGNORE INTO fax_permissions (fax_id, user_id) VALUES (?, ?)', [faxId, uid], (insErr) => {
+                    if (insErr && !hasError) {
+                        hasError = true;
+                        db.run('ROLLBACK');
+                        return res.status(500).json({ error: 'Database error' });
+                    }
+                    completed++;
+                    if (completed === userIds.length && !hasError) {
+                        db.run('COMMIT');
+                        return res.json({ message: 'Visibility updated successfully' });
+                    }
+                });
+            });
+        });
+    });
+});
+
 // Departments
 app.get('/api/departments', authenticateToken, (req, res) => {
     db.all('SELECT id, name FROM departments ORDER BY name', (err, rows) => {
+        if (err) {
+            return res.status(500).json({ error: 'Database error' });
+        }
+        res.json(rows);
+    });
+});
+
+// Basic users list for managers/admins (for visibility selection)
+app.get('/api/users/basic', authenticateToken, (req, res) => {
+    if (!(req.user && (req.user.role === 'admin' || req.user.role === 'manager'))) {
+        return res.status(403).json({ error: 'Access denied' });
+    }
+    db.all('SELECT id, full_name, email, role FROM users ORDER BY full_name', (err, rows) => {
         if (err) {
             return res.status(500).json({ error: 'Database error' });
         }
