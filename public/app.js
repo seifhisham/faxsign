@@ -71,10 +71,25 @@ function renderPreview(faxId, meta) {
 function maximizeFax(faxId) {
     // Use preview cache if available, otherwise fallback to existing viewFax fetch
     const meta = faxPreviewCache.get(faxId);
+    const modal = document.getElementById('faxViewerModal');
+    const frame = document.getElementById('faxViewerFrame');
+    const img = document.getElementById('faxViewerImage');
+
+    // Reset views
+    frame.style.display = 'none';
+    frame.src = 'about:blank';
+    if (img) {
+        img.style.display = 'none';
+        img.removeAttribute('src');
+    }
+
     if (meta && meta.url) {
-        const frame = document.getElementById('faxViewerFrame');
+        // Use cached preview URL; do not revoke on close
+        currentFaxObjectUrl = meta.url;
+        modalOwnsUrl = false;
         frame.src = meta.url;
-        document.getElementById('faxViewerModal').style.display = 'block';
+        frame.style.display = 'block';
+        modal.style.display = 'block';
         return;
     }
     // Not cached yet, fetch via viewFax
@@ -89,8 +104,11 @@ function setupEventListeners() {
     // Upload form
     document.getElementById('uploadForm').addEventListener('submit', handleUpload);
     
-    // Workflow form
-    document.getElementById('workflowForm').addEventListener('submit', handleCreateWorkflow);
+    // Workflow form (removed tab) - guard in case element doesn't exist
+    const wfForm = document.getElementById('workflowForm');
+    if (wfForm) {
+        wfForm.addEventListener('submit', handleCreateWorkflow);
+    }
     
     // File upload
     document.getElementById('faxFile').addEventListener('change', handleFileSelect);
@@ -372,13 +390,6 @@ function showTab(tabName, el) {
         case 'faxes':
             loadFaxes();
             break;
-        case 'workflows':
-            loadWorkflows();
-            break;
-        case 'create-workflow':
-            loadFaxesForWorkflow();
-            loadUsers();
-            break;
         case 'user-management':
             loadUsersForManagement();
             break;
@@ -418,7 +429,6 @@ async function loadInitialData() {
         await loadUsers();
     }
     await loadFaxes();
-    await loadWorkflows();
 }
 
 // Fax functions
@@ -509,11 +519,156 @@ function displayFaxes(faxes) {
             </div>
             ${assignControl}
             ${manageVisibility}
+
+            <div class="comments">
+                <div class="comments-header">
+                    <div class="comments-title">
+                        <i class="fas fa-comments" style="color:#667eea;"></i>
+                        <span>Comments</span>
+                        <span id="comments-count-${fax.id}" class="comments-count">${Number(fax.comments_count || 0)}</span>
+                    </div>
+                    <button class="btn btn-ghost btn-sm comments-toggle" id="comments-toggle-${fax.id}" onclick="toggleFaxComments(${fax.id})">Show</button>
+                </div>
+                <div id="comments-section-${fax.id}" class="comments-body" style="display:none;">
+                    <div id="comments-list-${fax.id}" class="comments-list">
+                        <div class="comment-empty">No comments yet</div>
+                    </div>
+                    <div class="comment-actions">
+                        <input id="comment-input-${fax.id}" class="input" type="text" maxlength="2000" placeholder="Add a comment..." />
+                        <button class="btn btn-sm" id="comment-btn-${fax.id}" onclick="addFaxComment(${fax.id})">Add</button>
+                    </div>
+                    <div id="comment-msg-${fax.id}" class="comment-empty" style="display:none;"></div>
+                </div>
+            </div>
         </div>`;
     }).join('');
 
     // After rendering cards, load previews
     faxes.forEach(f => loadFaxPreview(f.id));
+}
+
+// Toggle and load comments for a fax
+async function toggleFaxComments(faxId) {
+    const sec = document.getElementById(`comments-section-${faxId}`);
+    const btn = document.getElementById(`comments-toggle-${faxId}`);
+    if (!sec) return;
+    const willShow = (sec.style.display === 'none' || sec.style.display === '');
+    if (willShow) {
+        sec.style.display = 'block';
+        await loadFaxComments(faxId);
+        if (btn) btn.textContent = 'Hide';
+    } else {
+        sec.style.display = 'none';
+        if (btn) btn.textContent = 'Show';
+    }
+}
+
+// Safely compute initials from a display name (supports single or multi-word names)
+function getInitials(name) {
+    const s = (name || '').toString().trim();
+    if (!s) return '?';
+    const parts = s.split(/\s+/).filter(Boolean);
+    const letters = [];
+    for (const p of parts) {
+        if (p && p[0]) letters.push(p[0]);
+        if (letters.length >= 2) break;
+    }
+    if (letters.length === 0 && s[0]) letters.push(s[0]);
+    if (letters.length === 1) {
+        const compact = s.replace(/\s+/g, '');
+        if (compact.length > 1) letters.push(compact[1]);
+    }
+    return letters.join('').toUpperCase();
+}
+
+async function loadFaxComments(faxId) {
+    const list = document.getElementById(`comments-list-${faxId}`);
+    if (!list) return;
+    list.innerHTML = '<div class="comment-loading">Loading comments...</div>';
+    try {
+        const res = await fetch(`/api/faxes/${faxId}/comments`, { headers: { 'Authorization': `Bearer ${currentToken}` } });
+        if (!res.ok) {
+            let serverMsg = '';
+            try {
+                const data = await res.json();
+                serverMsg = data && (data.error || data.message) ? `${data.error || data.message}` : '';
+            } catch (_) {
+                try { serverMsg = await res.text(); } catch (_) { /* noop */ }
+            }
+            const msg = `Failed to load comments${res.status ? ` (HTTP ${res.status})` : ''}${serverMsg ? `: ${serverMsg}` : ''}`;
+            console.error('[comments] load failed', { faxId, status: res.status, serverMsg });
+            list.innerHTML = `<div class="comment-error">${msg}</div>`;
+            return;
+        }
+        const comments = await res.json();
+        if (!Array.isArray(comments)) {
+            console.error('[comments] unexpected payload', comments);
+            list.innerHTML = '<div class="comment-error">Failed to load comments: invalid server response</div>';
+            return;
+        }
+        if (comments.length === 0) {
+            list.innerHTML = '<div class="comment-empty">No comments yet</div>';
+            updateCommentsCount(faxId, 0);
+            return;
+        }
+        try {
+            const html = comments.map(c => {
+                const dateStr = new Date(c.created_at).toLocaleString();
+                const safeText = (c.comment || '').replace(/[&<>]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[ch]));
+                const name = c.user_name || ('User ' + c.user_id);
+                const initials = getInitials(name);
+                return `<div class=\"comment-item\">\n                    <div class=\"comment-avatar\">${initials}</div>\n                    <div style=\"flex:1;\">\n                        <div class=\"comment-meta\">${name}<span class=\"comment-date\">${dateStr}</span></div>\n                        <div class=\"comment-text\">${safeText}</div>\n                    </div>\n                </div>`;
+            }).join('');
+            list.innerHTML = html;
+            updateCommentsCount(faxId, comments.length);
+            console.debug('[comments] loaded', { faxId, count: comments.length });
+        } catch (renderErr) {
+            console.error('[comments] render error', renderErr);
+            list.innerHTML = `<div class=\"comment-error\">Failed to render comments: ${renderErr && renderErr.message ? renderErr.message : 'unknown error'}</div>`;
+        }
+    } catch (e) {
+        console.error('[comments] load exception', e);
+        const msg = (e && e.message) ? `Failed to load comments: ${e.message}` : 'Failed to load comments';
+        list.innerHTML = `<div class="comment-error">${msg}</div>`;
+    }
+}
+
+async function addFaxComment(faxId) {
+    const input = document.getElementById(`comment-input-${faxId}`);
+    const btn = document.getElementById(`comment-btn-${faxId}`);
+    const msg = document.getElementById(`comment-msg-${faxId}`);
+    if (!input || !btn) return;
+    const text = (input.value || '').trim();
+    if (!text) {
+        if (msg) { msg.style.display = 'block'; msg.className = 'comment-error'; msg.textContent = 'Comment cannot be empty.'; }
+        return;
+    }
+    btn.disabled = true;
+    if (msg) { msg.style.display = 'none'; msg.textContent = ''; }
+    try {
+        const res = await fetch(`/api/faxes/${faxId}/comments`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentToken}` },
+            body: JSON.stringify({ comment: text })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            if (msg) { msg.style.display = 'block'; msg.className = 'comment-error'; msg.textContent = data.error || 'Failed to add comment'; }
+            return;
+        }
+        input.value = '';
+        if (msg) { msg.style.display = 'block'; msg.className = 'comment-success'; msg.textContent = 'Comment added.'; }
+        await loadFaxComments(faxId);
+    } catch (e) {
+        if (msg) { msg.style.display = 'block'; msg.className = 'comment-error'; msg.textContent = 'Network error.'; }
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+function updateCommentsCount(faxId, count) {
+    const el = document.getElementById(`comments-count-${faxId}`);
+    if (el) el.textContent = String(count);
 }
 
 // Manage visibility panel logic (admin/manager)
@@ -887,6 +1042,19 @@ function closeSignatureModal() {
 
 // Fax Viewer
 let currentFaxObjectUrl = null;
+let modalOwnsUrl = false; // true if the modal created the object URL and should revoke it
+let faxStatusTimeout = null;
+
+function setFaxViewerStatus(text = 'Loading...', show = true) {
+    const s = document.getElementById('faxViewerStatus');
+    if (!s) return;
+    if (show) {
+        s.textContent = text;
+        s.style.display = 'block';
+    } else {
+        s.style.display = 'none';
+    }
+}
 async function viewFax(faxId) {
     try {
         const res = await fetch(`/api/faxes/${faxId}/file`, {
@@ -894,20 +1062,52 @@ async function viewFax(faxId) {
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
+            console.error('Open fax failed', { status: res.status, statusText: res.statusText, err });
             alert(err.error || 'Failed to open fax');
             return;
         }
         const blob = await res.blob();
-        // Revoke previous URL if any
-        if (currentFaxObjectUrl) {
+        // Revoke previous URL if we own it
+        if (currentFaxObjectUrl && modalOwnsUrl) {
             URL.revokeObjectURL(currentFaxObjectUrl);
-            currentFaxObjectUrl = null;
         }
         currentFaxObjectUrl = URL.createObjectURL(blob);
+        modalOwnsUrl = true;
+
         const frame = document.getElementById('faxViewerFrame');
+        const img = document.getElementById('faxViewerImage');
+
+        const modal = document.getElementById('faxViewerModal');
+
+        // Reset both views
+        frame.style.display = 'none';
+        frame.src = 'about:blank';
+        img.style.display = 'none';
+        img.removeAttribute('src');
+
+        // Force using iframe for reliability across types
+        setFaxViewerStatus('Loading...', true);
+        // Clear previous onload listener
+        frame.onload = () => {
+            setFaxViewerStatus('', false);
+            if (faxStatusTimeout) { clearTimeout(faxStatusTimeout); faxStatusTimeout = null; }
+        };
         frame.src = currentFaxObjectUrl;
-        document.getElementById('faxViewerModal').style.display = 'block';
+        frame.style.display = 'block';
+        img.style.display = 'none';
+        img.removeAttribute('src');
+
+        // Now show the modal after content is set
+        modal.style.display = 'block';
+
+        // Safety timeout to keep user informed
+        if (faxStatusTimeout) clearTimeout(faxStatusTimeout);
+        faxStatusTimeout = setTimeout(() => {
+            setFaxViewerStatus('Still loading...', true);
+        }, 3000);
     } catch (e) {
+        try { document.getElementById('faxViewerModal').style.display = 'none'; } catch {}
+        console.error('Exception opening fax', e);
         alert('Failed to open fax');
     }
 }
@@ -915,12 +1115,21 @@ async function viewFax(faxId) {
 function closeFaxViewer() {
     const modal = document.getElementById('faxViewerModal');
     const frame = document.getElementById('faxViewerFrame');
+    const img = document.getElementById('faxViewerImage');
     modal.style.display = 'none';
+    setFaxViewerStatus('', false);
+    if (faxStatusTimeout) { clearTimeout(faxStatusTimeout); faxStatusTimeout = null; }
     frame.src = 'about:blank';
-    if (currentFaxObjectUrl) {
-        URL.revokeObjectURL(currentFaxObjectUrl);
-        currentFaxObjectUrl = null;
+    frame.style.display = 'none';
+    if (img) {
+        img.removeAttribute('src');
+        img.style.display = 'none';
     }
+    if (currentFaxObjectUrl && modalOwnsUrl) {
+        URL.revokeObjectURL(currentFaxObjectUrl);
+    }
+    currentFaxObjectUrl = null;
+    modalOwnsUrl = false;
 }
 
 function startDrawing(e) {

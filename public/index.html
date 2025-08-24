@@ -463,6 +463,61 @@
                 border-bottom: 1px solid #e2e8f0;
             }
         }
+
+        /* Fax preview refinements */
+        .fax-preview {
+            border: 1px solid #e2e8f0;
+            border-radius: 10px;
+            background: #f8fafc;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 140px;
+            transition: border-color 0.2s ease, background 0.2s ease;
+        }
+        .fax-preview:hover { border-color: #cbd5e0; background: #f9fbff; }
+
+        /* Comments UI */
+        .comments {
+            margin-top: 14px;
+            padding-top: 12px;
+            border-top: 1px dashed #e2e8f0;
+        }
+        .comments-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+        }
+        .comments-title { font-weight: 600; color: #2d3748; display:flex; align-items:center; gap:8px; }
+        .comments-count { background:#edf2f7; color:#4a5568; padding:2px 8px; border-radius:999px; font-size:12px; }
+        .comments-toggle.btn-sm { width: auto; }
+        .comments-body { margin-top: 8px; }
+        .comments-list {
+            max-height: 220px;
+            overflow: auto;
+            background: #f7fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 8px;
+        }
+        .comment-item { display:flex; gap:10px; padding:8px 4px; border-bottom:1px solid #edf2f7; }
+        .comment-avatar { width:28px; height:28px; border-radius:50%; background:#e2e8f0; color:#2d3748; display:flex; align-items:center; justify-content:center; font-weight:600; font-size:12px; }
+        .comment-meta { font-weight:600; color:#2d3748; font-size:13px; }
+        .comment-date { color:#718096; font-weight:400; font-size:11px; margin-left:6px; }
+        .comment-text { color:#2d3748; font-size:13px; }
+        .comment-empty, .comment-loading { color:#718096; padding:6px; }
+        .comment-error { color:#e53e3e; padding:6px; }
+        .comment-success { color:#38a169; padding:6px; }
+        .comment-actions { display:flex; gap:8px; margin-top:8px; }
+
+        /* Utilities */
+        .btn-sm { padding: 8px 12px; font-size: 13px; }
+        .btn-ghost { background: transparent; color:#4a5568; border:1px solid #e2e8f0; }
+        .btn-ghost:hover { background:#f7fafc; }
+        .input { padding:10px 12px; border:1px solid #cbd5e0; border-radius:8px; width:100%; font-size:14px; }
+        .input:focus { outline:none; border-color:#667eea; }
+        .clickable { cursor: pointer; }
     </style>
 </head>
 <body>
@@ -502,9 +557,7 @@
             <!-- Navigation Tabs -->
             <div class="nav-tabs">
                 <button class="nav-tab active" data-tab="faxes" onclick="showTab('faxes', this)">Faxes</button>
-                <button class="nav-tab" data-tab="workflows" onclick="showTab('workflows', this)">Signature Workflows</button>
                 <button class="nav-tab" data-tab="upload" onclick="showTab('upload', this)">Upload Fax</button>
-                <button class="nav-tab" data-tab="create-workflow" onclick="showTab('create-workflow', this)">Create Workflow</button>
                 <button class="nav-tab admin-only" data-tab="user-management" onclick="showTab('user-management', this)" style="display: none;">User Management</button>
                 <button class="nav-tab admin-only" data-tab="department-management" onclick="showTab('department-management', this)" style="display: none;">Department Management</button>
             </div>
@@ -513,12 +566,6 @@
             <div id="faxes" class="tab-content active">
                 <h2>Received Faxes</h2>
                 <div id="faxesList"></div>
-            </div>
-
-            <!-- Workflows Tab -->
-            <div id="workflows" class="tab-content">
-                <h2>Signature Workflows</h2>
-                <div id="workflowsList"></div>
             </div>
 
             <!-- Upload Fax Tab -->
@@ -547,31 +594,6 @@
                 <div id="uploadMessage"></div>
             </div>
 
-            <!-- Create Workflow Tab -->
-            <div id="create-workflow" class="tab-content">
-                <h2>Create Signature Workflow</h2>
-                <form id="workflowForm">
-                    <div class="form-group">
-                        <label for="workflowFax">Select Fax</label>
-                        <select id="workflowFax" name="workflowFax" required>
-                            <option value="">Choose a fax...</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label for="workflowName">Workflow Name</label>
-                        <input type="text" id="workflowName" name="workflowName" required>
-                    </div>
-                    <div class="form-group">
-                        <label>Add Signers</label>
-                        <div id="signersList" class="signer-list">
-                            <!-- Signers will be added here -->
-                        </div>
-                        <button type="button" class="btn btn-secondary" onclick="addSigner()">Add Signer</button>
-                    </div>
-                    <button type="submit" class="btn">Create Workflow</button>
-                </form>
-                <div id="workflowMessage"></div>
-            </div>
 
             <!-- User Management Tab (Admin Only) -->
             <div id="user-management" class="tab-content">
@@ -623,12 +645,19 @@
 
     <!-- Fax Viewer Modal -->
     <div id="faxViewerModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); z-index: 1100;">
-        <div style="background: white; margin: 30px auto; padding: 10px; border-radius: 12px; max-width: 90%; max-height: 90%; display: flex; flex-direction: column; gap: 10px;">
+        <div style="background: white; margin: 30px auto; padding: 10px; border-radius: 12px; max-width: 98%; max-height: 96%; display: flex; flex-direction: column; gap: 10px; overflow: hidden;">
             <div style="display:flex; justify-content: space-between; align-items:center; padding: 8px 12px;">
                 <h3 style="margin:0; color:#4a5568;">Fax Viewer</h3>
                 <button class="btn btn-secondary" onclick="closeFaxViewer()" style="width:auto;">Close</button>
             </div>
-            <iframe id="faxViewerFrame" title="Fax Document" style="flex:1; width: 80vw; height: 75vh; border: 1px solid #e2e8f0; border-radius: 8px;" src="about:blank"></iframe>
+            <div style="flex:1; display:flex; align-items:center; justify-content:center; overflow: hidden; position: relative;">
+                <div id="faxViewerStatus" style="position:absolute; top:12px; left:12px; background: rgba(0,0,0,0.6); color:#fff; padding:6px 10px; border-radius:6px; font-size:13px; display:none; z-index:1;">Loading...</div>
+                <img id="faxViewerImage" alt="Fax" 
+                     style="display:none; max-width:95vw; max-height:90vh; width:100%; height:100%; object-fit: contain; border: 1px solid #e2e8f0; border-radius: 8px;" />
+                <iframe id="faxViewerFrame" title="Fax Document" 
+                        style="display:none; width: 95vw; height: 90vh; border: 1px solid #e2e8f0; border-radius: 8px;" 
+                        src="about:blank"></iframe>
+            </div>
         </div>
     </div>
 

@@ -83,6 +83,17 @@ db.serialize(() => {
         FOREIGN KEY (user_id) REFERENCES users (id)
     )`);
 
+    // Fax comments table
+    db.run(`CREATE TABLE IF NOT EXISTS fax_comments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        fax_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        comment TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (fax_id) REFERENCES faxes (id),
+        FOREIGN KEY (user_id) REFERENCES users (id)
+    )`);
+
     // Create default admin user
     const adminPassword = bcrypt.hashSync(config.DEFAULT_ADMIN.password, config.PASSWORD_SALT_ROUNDS);
     db.run(`INSERT OR IGNORE INTO users (username, email, password, full_name, role) 
@@ -285,6 +296,96 @@ app.get('/api/faxes/:id/file', authenticateToken, (req, res) => {
     );
 });
 
+// Fax comments: list comments for a fax (user must have access to the fax)
+app.get('/api/faxes/:id/comments', authenticateToken, (req, res) => {
+    const faxId = parseInt(req.params.id, 10);
+    if (!Number.isInteger(faxId)) {
+        return res.status(400).json({ error: 'Invalid fax id' });
+    }
+    db.get(
+        `SELECT f.id, f.assigned_department_id,
+                (SELECT COUNT(*) FROM fax_permissions fp WHERE fp.fax_id = f.id) as permissions_count,
+                EXISTS(SELECT 1 FROM fax_permissions fp2 WHERE fp2.fax_id = f.id AND fp2.user_id = ?) as is_permitted
+         FROM faxes f WHERE f.id = ?`,
+        [req.user.id, faxId],
+        (err, fax) => {
+            if (err) {
+                console.error('[comments:list] db.get fax error', err);
+                return res.status(500).json({ error: 'Database error' });
+            }
+            if (!fax) return res.status(404).json({ error: 'Fax not found' });
+            if (!isPrivileged(req.user)) {
+                const hasExplicit = Number(fax.permissions_count || 0) > 0;
+                const sameDept = fax.assigned_department_id === req.user.department_id;
+                if ((hasExplicit && !fax.is_permitted) || (!hasExplicit && !sameDept)) {
+                    return res.status(403).json({ error: 'Access denied' });
+                }
+            }
+            db.all(
+                `SELECT c.id, c.comment, c.created_at, c.user_id, u.full_name AS user_name
+                 FROM fax_comments c
+                 LEFT JOIN users u ON u.id = c.user_id
+                 WHERE c.fax_id = ?
+                 ORDER BY c.created_at ASC`,
+                [faxId],
+                (err2, rows) => {
+                    if (err2) {
+                        console.error('[comments:list] db.all comments error', err2);
+                        return res.status(500).json({ error: 'Database error' });
+                    }
+                    const out = rows || [];
+                    console.log('[comments:list] ok', { faxId, rows: out.length });
+                    return res.json(out);
+                }
+            );
+        }
+    );
+});
+
+// Fax comments: add a comment to a fax (user must have access)
+app.post('/api/faxes/:id/comments', authenticateToken, (req, res) => {
+    const faxId = parseInt(req.params.id, 10);
+    if (!Number.isInteger(faxId)) {
+        return res.status(400).json({ error: 'Invalid fax id' });
+    }
+    const text = (req.body && typeof req.body.comment === 'string') ? req.body.comment.trim() : '';
+    if (!text) return res.status(400).json({ error: 'Comment is required' });
+    if (text.length > 2000) return res.status(400).json({ error: 'Comment too long (max 2000 chars)' });
+
+    db.get(
+        `SELECT f.id, f.assigned_department_id,
+                (SELECT COUNT(*) FROM fax_permissions fp WHERE fp.fax_id = f.id) as permissions_count,
+                EXISTS(SELECT 1 FROM fax_permissions fp2 WHERE fp2.fax_id = f.id AND fp2.user_id = ?) as is_permitted
+         FROM faxes f WHERE f.id = ?`,
+        [req.user.id, faxId],
+        (err, fax) => {
+            if (err) {
+                console.error('[comments:add] db.get fax error', err);
+                return res.status(500).json({ error: 'Database error' });
+            }
+            if (!fax) return res.status(404).json({ error: 'Fax not found' });
+            if (!isPrivileged(req.user)) {
+                const hasExplicit = Number(fax.permissions_count || 0) > 0;
+                const sameDept = fax.assigned_department_id === req.user.department_id;
+                if ((hasExplicit && !fax.is_permitted) || (!hasExplicit && !sameDept)) {
+                    return res.status(403).json({ error: 'Access denied' });
+                }
+            }
+            db.run(
+                'INSERT INTO fax_comments (fax_id, user_id, comment) VALUES (?, ?, ?)',
+                [faxId, req.user.id, text],
+                function(insErr) {
+                    if (insErr) {
+                        console.error('[comments:add] db.run insert error', insErr);
+                        return res.status(500).json({ error: 'Database error' });
+                    }
+                    return res.json({ message: 'Comment added', commentId: this.lastID });
+                }
+            );
+        }
+    );
+});
+
 app.post('/api/auth/register', (req, res) => {
     const { username, email, password, full_name } = req.body;
     const hashedPassword = bcrypt.hashSync(password, config.PASSWORD_SALT_ROUNDS);
@@ -345,7 +446,8 @@ app.get('/api/faxes', authenticateToken, (req, res) => {
     const sql = `SELECT f.*, 
                         u.full_name as uploaded_by_name, 
                         d.name as assigned_department_name,
-                        (SELECT COUNT(*) FROM fax_permissions fp WHERE fp.fax_id = f.id) as permissions_count
+                        (SELECT COUNT(*) FROM fax_permissions fp WHERE fp.fax_id = f.id) as permissions_count,
+                        (SELECT COUNT(*) FROM fax_comments c WHERE c.fax_id = f.id) as comments_count
                  FROM faxes f
                  LEFT JOIN users u ON f.uploaded_by = u.id
                  LEFT JOIN departments d ON f.assigned_department_id = d.id
@@ -364,6 +466,7 @@ app.get('/api/faxes/:id', authenticateToken, (req, res) => {
     db.get(
         `SELECT f.*, u.full_name as uploaded_by_name, d.name as assigned_department_name,
                 (SELECT COUNT(*) FROM fax_permissions fp WHERE fp.fax_id = f.id) as permissions_count,
+                (SELECT COUNT(*) FROM fax_comments c WHERE c.fax_id = f.id) as comments_count,
                 EXISTS(SELECT 1 FROM fax_permissions fp2 WHERE fp2.fax_id = f.id AND fp2.user_id = ?) as is_permitted
          FROM faxes f 
          LEFT JOIN users u ON f.uploaded_by = u.id 
