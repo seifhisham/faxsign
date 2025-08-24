@@ -101,6 +101,13 @@
             background: #718096;
         }
 
+        .btn-confirm {
+            background: linear-gradient(135deg, #38a169 0%, #2f855a 100%);
+            color: #fff;
+        }
+        .btn-confirm:hover { transform: translateY(-2px); filter: brightness(1.05); }
+        .btn:disabled { opacity: 0.7; cursor: not-allowed; }
+
         .main-content {
             display: none;
         }
@@ -176,6 +183,11 @@
         .status-pending {
             background: #fef5e7;
             color: #d69e2e;
+        }
+
+        .status-confirmed {
+            background: #e6fffa;
+            color: #2c7a7b;
         }
 
         .status-signed {
@@ -512,7 +524,7 @@
         .comment-actions { display:flex; gap:8px; margin-top:8px; }
 
         /* Utilities */
-        .btn-sm { padding: 8px 12px; font-size: 13px; }
+        .btn-sm { padding: 8px 12px; font-size: 13px; width: auto; }
         .btn-ghost { background: transparent; color:#4a5568; border:1px solid #e2e8f0; }
         .btn-ghost:hover { background:#f7fafc; }
         .input { padding:10px 12px; border:1px solid #cbd5e0; border-radius:8px; width:100%; font-size:14px; }
@@ -584,8 +596,8 @@
                         <label>Fax Document</label>
                         <div class="file-upload" onclick="document.getElementById('faxFile').click()">
                             <i class="fas fa-cloud-upload-alt" style="font-size: 48px; color: #cbd5e0; margin-bottom: 10px;"></i>
-                            <p>Click to upload fax document (PDF, JPEG, PNG, TIFF)</p>
-                            <input type="file" id="faxFile" name="fax" accept=".pdf,.jpg,.jpeg,.png,.tiff" required>
+                            <p>Click to upload fax document(s) (PDF, JPEG, PNG, TIFF)</p>
+                            <input type="file" id="faxFile" name="fax" accept=".pdf,.jpg,.jpeg,.png,.tiff" multiple required>
                         <span id="selectedFileName" style="display:block; margin-top:8px; color:#38a169;"></span>
                         </div>
                     </div>
@@ -610,6 +622,8 @@
                 <div class="admin-warning" style="background: #fef5e7; color: #d69e2e; padding: 15px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #d69e2e;">
                     <i class="fas fa-building"></i> <strong>Admin Panel:</strong> Only administrators can create, edit, and delete departments.
                 </div>
+                <!-- Department status/messages -->
+                <div id="departmentsMessage" style="display:none;"></div>
                 
                 <!-- Add New Department Form -->
                 <div class="card" style="margin-bottom: 30px;">

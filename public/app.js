@@ -347,7 +347,7 @@ function resetTabState() {
 function updateNavVisibility() {
     const uploadTab = document.querySelector(".nav-tabs .nav-tab[data-tab='upload']");
     const uploadTabAlt = Array.from(document.querySelectorAll('.nav-tab')).find(b => b.textContent.includes('Upload'));
-    const canUpload = currentUser && currentUser.role === 'faxes';
+    const canUpload = !!(currentUser && (currentUser.role === 'فاكسات' || currentUser.role === 'faxes'));
     const el = uploadTab || uploadTabAlt;
     if (el) {
         el.style.display = canUpload ? 'block' : 'none';
@@ -467,12 +467,25 @@ function displayFaxes(faxes) {
         faxesList.innerHTML = '<div class="loading">No faxes found</div>';
         return;
     }
-    
-    faxesList.innerHTML = faxes.map(fax => {
+
+    // Group by group_id when present; otherwise treat each as its own group
+    const groups = new Map(); // key -> array of fax rows
+    for (const f of faxes) {
+        const key = f.group_id ? `g:${f.group_id}` : `id:${f.id}`;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(f);
+    }
+
+    const groupCards = [];
+    for (const [, items] of groups) {
+        // Sort items by received_date ascending to keep natural order
+        items.sort((a, b) => new Date(a.received_date) - new Date(b.received_date));
+        const fax = items[0]; // representative
         const assignedLabel = fax.assigned_department_name ? `Assigned to: ${fax.assigned_department_name}` : 'Unassigned';
         const isRestricted = (fax.permissions_count || 0) > 0;
         const visibilityLabel = isRestricted ? 'Restricted: Specific users only' : 'Visible to department';
-        const assignControl = (isCurrentUserPrivileged && availableDepartments.length)
+        // Only managers can assign faxes (admins are explicitly excluded)
+        const assignControl = ((currentUser && currentUser.role === 'manager') && availableDepartments.length)
             ? `
             <div style="margin-top:10px;">
                 <label style="font-size:12px;color:#718096;">Assign to department</label>
@@ -481,7 +494,7 @@ function displayFaxes(faxes) {
                         <option value="">Choose...</option>
                         ${availableDepartments.map(d => `<option value="${d.id}" ${fax.assigned_department_name===d.name?'selected':''}>${d.name}</option>`).join('')}
                     </select>
-                    <button class="btn btn-secondary" onclick="assignFaxDepartment(${fax.id})">Assign</button>
+                    <button class="btn btn-secondary btn-sm" onclick="assignFaxDepartment(${fax.id})">Assign</button>
                 </div>
             </div>`
             : '';
@@ -493,29 +506,52 @@ function displayFaxes(faxes) {
                     <span class="status-badge" style="background:${isRestricted?'#ebf8ff':'#f0fff4'}; color:${isRestricted?'#3182ce':'#38a169'};">${visibilityLabel}</span>
                 </div>
                 <div style="margin-top:8px;">
-                    <button class="btn btn-secondary" onclick="toggleVisibilityPanel(${fax.id})">Manage visibility</button>
+                    <button class="btn btn-secondary btn-sm" onclick="toggleVisibilityPanel(${fax.id})">Manage visibility</button>
                 </div>
                 <div id="vis-panel-${fax.id}" style="display:none; margin-top:10px; padding:10px; border:1px solid #e2e8f0; border-radius:8px;">
                     <div id="vis-users-${fax.id}" class="signer-list" style="max-height:200px; overflow:auto;">
                         <div class="loading">Loading users...</div>
                     </div>
                     <div style="margin-top:10px; display:flex; gap:8px;">
-                        <button class="btn" onclick="saveFaxVisibility(${fax.id})">Save</button>
-                        <button class="btn btn-secondary" onclick="document.getElementById('vis-panel-${fax.id}').style.display='none'">Cancel</button>
+                        <button class="btn btn-sm" onclick="saveFaxVisibility(${fax.id})">Save</button>
+                        <button class="btn btn-secondary btn-sm" onclick="document.getElementById('vis-panel-${fax.id}').style.display='none'">Cancel</button>
                     </div>
                 </div>
             </div>`
             : '';
-        return `
+        const hasExplicit = Number(fax.permissions_count || 0) > 0;
+        const sameDept = fax.assigned_department_id === (currentUser && currentUser.department_id);
+        const allowedByVisibility = hasExplicit ? !!fax.is_permitted : sameDept;
+        const statusLower = String(fax.status).toLowerCase();
+        const canChange = statusLower === 'pending';
+        const statusIcon = statusLower === 'pending'
+            ? '<i class="fas fa-hourglass-half" aria-hidden="true"></i>'
+            : (statusLower === 'confirmed' ? '<i class="fas fa-check-circle" aria-hidden="true"></i>' : '');
+        const statusAction = canChange
+            ? `<button class="btn btn-confirm btn-sm" style="margin-left:8px" onclick="updateFaxStatus(${fax.id}, 'confirmed')"><i class="fas fa-check"></i> Confirm</button>`
+            : '';
+        // Previews: multiple for the group
+        const previewsHtml = items.map(item => `
+            <div id="fax-preview-${item.id}" class="fax-preview" 
+                 style="flex:0 0 200px; height:260px; margin-right:8px; border:1px solid #e2e8f0; border-radius:8px; overflow:hidden; background:#f8fafc; display:flex; align-items:center; justify-content:center; cursor:pointer;"
+                 onclick="maximizeFax(${item.id})">
+                <div style="padding:16px; color:#718096; font-size:14px;">Loading preview...</div>
+            </div>
+        `).join('');
+
+        groupCards.push(`
         <div class="card">
-            <h3>Fax from ${fax.sender_name}</h3>
-            <p><strong>Fax Number:</strong> ${fax.fax_number}</p>
+            <h3>Fax Recomendation ${fax.sender_name}</h3>
+            <p><strong>Fax From:</strong> ${fax.fax_number}</p>
             <p><strong>Received:</strong> ${new Date(fax.received_date).toLocaleDateString()}</p>
             <p><strong>Uploaded by:</strong> ${fax.uploaded_by_name}</p>
             <p><strong>${assignedLabel}</strong></p>
-            <span class="status-badge status-${fax.status}">${fax.status}</span>
-            <div id="fax-preview-${fax.id}" class="fax-preview" style="margin-top:12px; border:1px solid #e2e8f0; border-radius:8px; overflow:hidden; background:#f8fafc; display:flex; align-items:center; justify-content:center; cursor:pointer;" onclick="maximizeFax(${fax.id})">
-                <div style="padding:16px; color:#718096; font-size:14px;">Loading preview...</div>
+            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                <span id="fax-status-${fax.id}" class="status-badge status-${statusLower}">${statusIcon}<span style="margin-left:6px;">${statusLower}</span></span>
+                ${statusAction}
+            </div>
+            <div style="margin-top:12px; display:flex; overflow:auto;">
+                ${previewsHtml}
             </div>
             ${assignControl}
             ${manageVisibility}
@@ -540,11 +576,40 @@ function displayFaxes(faxes) {
                     <div id="comment-msg-${fax.id}" class="comment-empty" style="display:none;"></div>
                 </div>
             </div>
-        </div>`;
-    }).join('');
+        </div>`);
+    }
 
-    // After rendering cards, load previews
+    faxesList.innerHTML = groupCards.join('');
+
+    // After rendering cards, load previews for all faxes in all groups
     faxes.forEach(f => loadFaxPreview(f.id));
+}
+
+// Update fax status (pending -> confirmed) for privileged users
+async function updateFaxStatus(faxId, newStatus) {
+    const btn = event && event.target ? event.target : null;
+    if (btn) btn.disabled = true;
+    try {
+        const res = await fetch(`/api/faxes/${faxId}/status`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${currentToken}`
+            },
+            body: JSON.stringify({ status: newStatus })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            alert(data.error || 'Failed to update status');
+            return;
+        }
+        // Refresh the list to reflect status change and any derived UI
+        await loadFaxes();
+    } catch (e) {
+        alert('Network error while updating status');
+    } finally {
+        if (btn) btn.disabled = false;
+    }
 }
 
 // Toggle and load comments for a fax
@@ -743,59 +808,87 @@ async function handleUpload(e) {
     const faxNumber = document.getElementById('faxNumber').value;
     const senderName = document.getElementById('senderName').value;
     const faxFileInput = document.getElementById('faxFile');
-    const faxFile = faxFileInput.files[0];
+    const files = Array.from(faxFileInput.files || []);
 
-    // Check if file is selected
-    if (!faxFile) {
-        showMessage('uploadMessage', 'Please select a fax file to upload.', 'error');
+    // Check if files are selected
+    if (!files.length) {
+        showMessage('uploadMessage', 'Please select at least one fax file to upload.', 'error');
         return;
     }
 
-    const formData = new FormData();
-    formData.append('fax_number', faxNumber);
-    formData.append('sender_name', senderName);
-    formData.append('fax', faxFile);
+    // Disable submit during upload
+    const form = document.getElementById('uploadForm');
+    const submitBtn = form && form.querySelector('button[type="submit"]');
+    if (submitBtn) submitBtn.disabled = true;
+
+    let success = 0;
+    let failures = [];
+    // Assign one group ID for this submission so the backend can group these files
+    const groupId = (window.crypto && typeof window.crypto.randomUUID === 'function')
+        ? window.crypto.randomUUID()
+        : `g-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
     try {
-        // Use the correct endpoint (likely /api/faxes)
-        const response = await fetch('/api/faxes/upload', {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${currentToken}`
-            },
-            body: formData
-        });
+        // Upload sequentially to avoid overwhelming server and preserve order
+        for (const file of files) {
+            const formData = new FormData();
+            formData.append('fax_number', faxNumber);
+            formData.append('sender_name', senderName);
+            formData.append('group_id', groupId);
+            formData.append('fax', file);
 
-        let data;
-        try {
-            data = await response.json();
-        } catch (jsonErr) {
-            data = { error: 'Unexpected server response.' };
+            const response = await fetch('/api/faxes/upload', {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${currentToken}` },
+                body: formData
+            });
+
+            let data = null;
+            try { data = await response.json(); } catch (_) { /* ignore */ }
+
+            if (response.ok) {
+                success += 1;
+            } else {
+                failures.push({ name: file.name, error: (data && data.error) || `${response.status}` });
+            }
         }
 
-        console.log('Upload response:', response, data); // Debug log
-
-        if (response.ok) {
-            showMessage('uploadMessage', 'Fax uploaded successfully!', 'success');
-            document.getElementById('uploadForm').reset();
-            loadFaxes();
+        if (success && failures.length === 0) {
+            showMessage('uploadMessage', `${success} file(s) uploaded successfully.`, 'success');
+        } else if (success && failures.length) {
+            const failList = failures.map(f => `${f.name} (${f.error})`).join(', ');
+            showMessage('uploadMessage', `${success} file(s) uploaded, ${failures.length} failed: ${failList}`, 'error');
         } else {
-            showMessage('uploadMessage', data.error || 'Upload failed. Please try again.', 'error');
+            const failList = failures.map(f => `${f.name} (${f.error})`).join(', ');
+            showMessage('uploadMessage', `All uploads failed: ${failList}`, 'error');
+        }
+
+        // Reset form and refresh if any succeeded
+        if (success) {
+            if (form) form.reset();
+            loadFaxes();
         }
     } catch (error) {
         console.error('Upload error:', error);
-        showMessage('uploadMessage', 'Upload failed. Please try again.', 'error');
+        showMessage('uploadMessage', 'Upload failed due to a network or server error.', 'error');
+    } finally {
+        if (submitBtn) submitBtn.disabled = false;
     }
 }
 
 
 function handleFileSelect(e) {
-    const file = e.target.files[0];
+    const files = Array.from(e.target.files || []);
     const fileNameSpan = document.getElementById('selectedFileName');
-    if (file && fileNameSpan) {
-        fileNameSpan.textContent = `Selected: ${file.name}`;
-    } else if (fileNameSpan) {
-        fileNameSpan.textContent = '';
+    if (fileNameSpan) {
+        if (!files.length) {
+            fileNameSpan.textContent = '';
+        } else if (files.length === 1) {
+            fileNameSpan.textContent = `Selected: ${files[0].name}`;
+        } else {
+            const names = files.slice(0, 3).map(f => f.name).join(', ');
+            fileNameSpan.textContent = `Selected ${files.length} files: ${names}${files.length > 3 ? ', ...' : ''}`;
+        }
     }
 }
 
@@ -934,6 +1027,11 @@ async function loadDepartments() {
 }
 
 async function assignFaxDepartment(faxId) {
+    // Frontend guard: only managers can assign faxes
+    if (!currentUser || currentUser.role !== 'manager') {
+        alert('Only managers can assign faxes');
+        return;
+    }
     const select = document.getElementById(`assign-select-${faxId}`);
     if (!select || !select.value) {
         alert('Please choose a department');
@@ -1413,14 +1511,14 @@ function displayDepartmentsForManagement(departments) {
                     <div class="user-count">ID: ${dept.id}</div>
                 </div>
                 <div class="department-actions">
-                    <button class="edit-btn" onclick="toggleEditDepartment(${dept.id}, '${dept.name}')">Edit</button>
-                    <button class="delete-btn" onclick="deleteDepartment(${dept.id}, '${dept.name}')">Delete</button>
+                    <button type="button" class="edit-btn" onclick="toggleEditDepartment(${dept.id}, '${dept.name}')">Edit</button>
+                    <button type="button" class="delete-btn" onclick="deleteDepartment(${dept.id}, '${dept.name}')">Delete</button>
                 </div>
             </div>
             <div id="edit-form-${dept.id}" class="edit-form">
-                <input type="text" id="edit-dept-${dept.id}" value="${dept.name}" placeholder="Department name">
-                <button class="btn" onclick="updateDepartment(${dept.id})">Save</button>
-                <button class="btn btn-secondary" onclick="toggleEditDepartment(${dept.id})">Cancel</button>
+                <input type="text" id="edit-dept-${dept.id}" value="${dept.name}" placeholder="Department name" onkeydown="if(event.key==='Enter'){ event.preventDefault(); updateDepartment(${dept.id}); }">
+                <button type="button" class="btn btn-sm" onclick="updateDepartment(${dept.id})">Save</button>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="toggleEditDepartment(${dept.id})">Cancel</button>
             </div>
         </div>
     `).join('');
@@ -1445,7 +1543,7 @@ async function updateDepartment(deptId) {
     const newName = document.getElementById(`edit-dept-${deptId}`).value.trim();
     
     if (!newName) {
-        showMessage('departmentsList', 'Department name cannot be empty', 'error');
+        showMessage('departmentsMessage', 'Department name cannot be empty', 'error');
         return;
     }
     
@@ -1462,16 +1560,16 @@ async function updateDepartment(deptId) {
         const data = await response.json();
         
         if (response.ok) {
-            showMessage('departmentsList', 'Department updated successfully', 'success');
+            showMessage('departmentsMessage', 'Department updated successfully', 'success');
             toggleEditDepartment(deptId);
             loadDepartmentsForManagement();
             // Also reload departments for other parts of the app
             await loadDepartments();
         } else {
-            showMessage('departmentsList', data.error || 'Failed to update department', 'error');
+            showMessage('departmentsMessage', data.error || 'Failed to update department', 'error');
         }
     } catch (error) {
-        showMessage('departmentsList', 'Network error. Please try again.', 'error');
+        showMessage('departmentsMessage', 'Network error. Please try again.', 'error');
     }
 }
 
@@ -1491,15 +1589,15 @@ async function deleteDepartment(deptId, deptName) {
         const data = await response.json();
         
         if (response.ok) {
-            showMessage('departmentsList', 'Department deleted successfully', 'success');
+            showMessage('departmentsMessage', 'Department deleted successfully', 'success');
             loadDepartmentsForManagement();
             // Also reload departments for other parts of the app
             await loadDepartments();
         } else {
-            showMessage('departmentsList', data.error || 'Failed to delete department', 'error');
+            showMessage('departmentsMessage', data.error || 'Failed to delete department', 'error');
         }
     } catch (error) {
-        showMessage('departmentsList', 'Network error. Please try again.', 'error');
+        showMessage('departmentsMessage', 'Network error. Please try again.', 'error');
     }
 }
 

@@ -111,9 +111,10 @@ db.serialize(() => {
         name TEXT UNIQUE NOT NULL
     )`);
 
-    // Attempt to add department columns if they don't exist
+    // Attempt to add department/group columns if they don't exist
     db.run(`ALTER TABLE users ADD COLUMN department_id INTEGER`, () => {});
     db.run(`ALTER TABLE faxes ADD COLUMN assigned_department_id INTEGER`, () => {});
+    db.run(`ALTER TABLE faxes ADD COLUMN group_id TEXT`, () => {});
 
     // Seed default departments
     if (Array.isArray(config.DEFAULT_DEPARTMENTS)) {
@@ -199,11 +200,46 @@ const authenticateToken = (req, res, next) => {
 
 // Privilege helpers
 const isPrivileged = (user) => user && (user.role === 'admin' || user.role === 'manager');
-const canUploadFaxes = (user) => user && user.role === 'faxes';
+// Support Arabic role name 'فاكسات' while remaining compatible with existing 'faxes'
+const isFaxRole = (user) => user && (user.role === 'فاكسات' || user.role === 'faxes');
+const canUploadFaxes = (user) => isFaxRole(user);
 
 // Routes
 
 // Authentication routes
+// Update fax status (allowed: pending -> confirmed). Authorization: any authenticated user
+app.post('/api/faxes/:id/status', authenticateToken, (req, res) => {
+    const faxId = parseInt(req.params.id, 10);
+    if (!Number.isInteger(faxId)) {
+        return res.status(400).json({ error: 'Invalid fax id' });
+    }
+    const newStatus = (req.body && req.body.status || '').toString().trim().toLowerCase();
+    if (!['pending', 'confirmed'].includes(newStatus)) {
+        return res.status(400).json({ error: 'Invalid status value' });
+    }
+    // Fetch current status
+    db.get('SELECT status FROM faxes WHERE id = ?', [faxId], (err, row) => {
+        if (err) {
+            console.error('[status] select error', err);
+            return res.status(500).json({ error: 'Database error' });
+        }
+        if (!row) return res.status(404).json({ error: 'Fax not found' });
+        const current = (row.status || '').toString();
+        if (current === newStatus) {
+            return res.json({ message: 'Status unchanged', status: current });
+        }
+        if (!(current === 'pending' && newStatus === 'confirmed')) {
+            return res.status(400).json({ error: 'Illegal status transition' });
+        }
+        db.run('UPDATE faxes SET status = ? WHERE id = ?', [newStatus, faxId], function(updErr) {
+            if (updErr) {
+                console.error('[status] update error', updErr);
+                return res.status(500).json({ error: 'Database error' });
+            }
+            return res.json({ message: 'Status updated', status: newStatus });
+        });
+    });
+});
 app.post('/api/auth/login', (req, res) => {
     const { username, password } = req.body;
 
@@ -409,16 +445,17 @@ app.post('/api/auth/register', (req, res) => {
 // Fax routes
 app.post('/api/faxes/upload', authenticateToken, upload.single('fax'), (req, res) => {
     // Allow both 'faxes' and privileged users to upload
-    if (!(req.user.role === 'faxes' || req.user.role === 'admin' || req.user.role === 'manager')) {
+    if (!(isFaxRole(req.user) || req.user.role === 'admin' || req.user.role === 'manager')) {
         return res.status(403).json({ error: 'Only users with faxes, admin, or manager role can upload faxes' });
     }
     const { fax_number, sender_name } = req.body;
+    const group_id = (req.body && req.body.group_id) ? String(req.body.group_id) : null;
     // Store only the filename to avoid absolute/relative path inconsistencies
     const file_path = req.file.filename;
 
     db.run(
-        'INSERT INTO faxes (fax_number, sender_name, file_path, uploaded_by, assigned_department_id) VALUES (?, ?, ?, ?, ?)',
-        [fax_number, sender_name, file_path, req.user.id, req.user.department_id || null],
+        'INSERT INTO faxes (fax_number, sender_name, file_path, uploaded_by, assigned_department_id, group_id) VALUES (?, ?, ?, ?, ?, ?)',
+        [fax_number, sender_name, file_path, req.user.id, req.user.department_id || null, group_id],
         function(err) {
             if (err) {
                 return res.status(500).json({ error: 'Database error' });
@@ -432,7 +469,7 @@ app.get('/api/faxes', authenticateToken, (req, res) => {
     // Privileged users see all faxes. Non-privileged see:
     // - faxes with no explicit permissions AND assigned to their department, OR
     // - faxes where they are explicitly permitted via fax_permissions
-    const isPriv = (req.user.role === 'admin' || req.user.role === 'manager' || req.user.role === 'faxes');
+    const isPriv = (req.user.role === 'admin' || req.user.role === 'manager' || isFaxRole(req.user));
     const params = [];
     let whereClause = '';
     if (!isPriv) {
@@ -447,13 +484,14 @@ app.get('/api/faxes', authenticateToken, (req, res) => {
                         u.full_name as uploaded_by_name, 
                         d.name as assigned_department_name,
                         (SELECT COUNT(*) FROM fax_permissions fp WHERE fp.fax_id = f.id) as permissions_count,
-                        (SELECT COUNT(*) FROM fax_comments c WHERE c.fax_id = f.id) as comments_count
+                        (SELECT COUNT(*) FROM fax_comments c WHERE c.fax_id = f.id) as comments_count,
+                        EXISTS(SELECT 1 FROM fax_permissions fp2 WHERE fp2.fax_id = f.id AND fp2.user_id = ?) as is_permitted
                  FROM faxes f
                  LEFT JOIN users u ON f.uploaded_by = u.id
                  LEFT JOIN departments d ON f.assigned_department_id = d.id
                  ${whereClause}
                  ORDER BY f.received_date DESC`;
-    db.all(sql, params, (err, faxes) => {
+    db.all(sql, params.concat([req.user.id]), (err, faxes) => {
         if (err) {
             return res.status(500).json({ error: 'Database error' });
         }
@@ -498,15 +536,33 @@ app.get('/api/faxes/:id/permissions', authenticateToken, (req, res) => {
         return res.status(403).json({ error: 'Only managers can manage visibility' });
     }
     const faxId = parseInt(req.params.id, 10);
-    db.all(`SELECT u.id, u.full_name, u.email, u.role
-            FROM fax_permissions fp
-            JOIN users u ON u.id = fp.user_id
-            WHERE fp.fax_id = ?
-            ORDER BY u.full_name`, [faxId], (err, rows) => {
-        if (err) {
+    // Group-aware: if this fax has a group_id, aggregate distinct users permitted across the group
+    db.get('SELECT group_id FROM faxes WHERE id = ?', [faxId], (gErr, faxRow) => {
+        if (gErr) {
             return res.status(500).json({ error: 'Database error' });
         }
-        res.json(rows);
+        if (!faxRow) {
+            return res.status(404).json({ error: 'Fax not found' });
+        }
+        const hasGroup = faxRow.group_id !== null && faxRow.group_id !== undefined;
+        const sql = hasGroup
+            ? `SELECT DISTINCT u.id, u.full_name, u.email, u.role
+               FROM fax_permissions fp
+               JOIN users u ON u.id = fp.user_id
+               WHERE fp.fax_id IN (SELECT id FROM faxes WHERE group_id = ?)
+               ORDER BY u.full_name`
+            : `SELECT u.id, u.full_name, u.email, u.role
+               FROM fax_permissions fp
+               JOIN users u ON u.id = fp.user_id
+               WHERE fp.fax_id = ?
+               ORDER BY u.full_name`;
+        const params = hasGroup ? [faxRow.group_id] : [faxId];
+        db.all(sql, params, (err, rows) => {
+            if (err) {
+                return res.status(500).json({ error: 'Database error' });
+            }
+            res.json(rows);
+        });
     });
 });
 
@@ -516,32 +572,54 @@ app.post('/api/faxes/:id/permissions', authenticateToken, (req, res) => {
     }
     const faxId = parseInt(req.params.id, 10);
     const userIds = Array.isArray(req.body.user_ids) ? req.body.user_ids.map(Number).filter(n => Number.isInteger(n)) : [];
-
-    db.serialize(() => {
-        db.run('BEGIN TRANSACTION');
-        db.run('DELETE FROM fax_permissions WHERE fax_id = ?', [faxId], (delErr) => {
-            if (delErr) {
-                db.run('ROLLBACK');
+    // Group-aware: apply to all fax IDs in the same group as the target fax
+    db.get('SELECT group_id FROM faxes WHERE id = ?', [faxId], (gErr, faxRow) => {
+        if (gErr) {
+            return res.status(500).json({ error: 'Database error' });
+        }
+        if (!faxRow) {
+            return res.status(404).json({ error: 'Fax not found' });
+        }
+        const hasGroup = faxRow.group_id !== null && faxRow.group_id !== undefined;
+        const idsSql = hasGroup ? 'SELECT id FROM faxes WHERE group_id = ?' : 'SELECT id FROM faxes WHERE id = ?';
+        const idsParam = hasGroup ? [faxRow.group_id] : [faxId];
+        db.all(idsSql, idsParam, (idsErr, idRows) => {
+            if (idsErr) {
                 return res.status(500).json({ error: 'Database error' });
             }
-            if (userIds.length === 0) {
-                db.run('COMMIT');
-                return res.json({ message: 'Visibility updated (now department-based)' });
-            }
-            let completed = 0;
-            let hasError = false;
-            userIds.forEach((uid) => {
-                db.run('INSERT OR IGNORE INTO fax_permissions (fax_id, user_id) VALUES (?, ?)', [faxId, uid], (insErr) => {
-                    if (insErr && !hasError) {
-                        hasError = true;
+            const faxIds = (idRows || []).map(r => r.id);
+            db.serialize(() => {
+                db.run('BEGIN TRANSACTION');
+                const placeholders = faxIds.map(() => '?').join(',');
+                const delSql = `DELETE FROM fax_permissions WHERE fax_id IN (${placeholders})`;
+                db.run(delSql, faxIds, (delErr) => {
+                    if (delErr) {
                         db.run('ROLLBACK');
                         return res.status(500).json({ error: 'Database error' });
                     }
-                    completed++;
-                    if (completed === userIds.length && !hasError) {
+                    if (userIds.length === 0) {
                         db.run('COMMIT');
-                        return res.json({ message: 'Visibility updated successfully' });
+                        return res.json({ message: 'Visibility updated (now department-based)' });
                     }
+                    let completed = 0;
+                    let hasError = false;
+                    const totalInserts = userIds.length * faxIds.length;
+                    faxIds.forEach(fid => {
+                        userIds.forEach(uid => {
+                            db.run('INSERT OR IGNORE INTO fax_permissions (fax_id, user_id) VALUES (?, ?)', [fid, uid], (insErr) => {
+                                if (insErr && !hasError) {
+                                    hasError = true;
+                                    db.run('ROLLBACK');
+                                    return res.status(500).json({ error: 'Database error' });
+                                }
+                                completed++;
+                                if (completed === totalInserts && !hasError) {
+                                    db.run('COMMIT');
+                                    return res.json({ message: 'Visibility updated successfully' });
+                                }
+                            });
+                        });
+                    });
                 });
             });
         });
@@ -650,10 +728,11 @@ app.delete('/api/departments/:id', authenticateToken, (req, res) => {
     });
 });
 
-// Assign fax to a department (privileged only)
+// Assign fax to a department (manager only)
 app.post('/api/faxes/:id/assign-department', authenticateToken, (req, res) => {
-    if (!isPrivileged(req.user)) {
-        return res.status(403).json({ error: 'Only managers or admins can assign faxes' });
+    // Business rule: Admins cannot assign faxes. Only managers can.
+    if (!req.user || req.user.role !== 'manager') {
+        return res.status(403).json({ error: 'Only managers can assign faxes' });
     }
     const faxId = parseInt(req.params.id, 10);
     const { department_id } = req.body;
@@ -667,11 +746,23 @@ app.post('/api/faxes/:id/assign-department', authenticateToken, (req, res) => {
         if (!dept) {
             return res.status(400).json({ error: 'Invalid department_id' });
         }
-        db.run('UPDATE faxes SET assigned_department_id = ? WHERE id = ?', [department_id, faxId], function(updateErr) {
-            if (updateErr) {
+        // Group-aware: assign the entire group if exists
+        db.get('SELECT group_id FROM faxes WHERE id = ?', [faxId], (gErr, faxRow) => {
+            if (gErr) {
                 return res.status(500).json({ error: 'Database error' });
             }
-            return res.json({ message: 'Fax assigned successfully' });
+            if (!faxRow) {
+                return res.status(404).json({ error: 'Fax not found' });
+            }
+            const hasGroup = faxRow.group_id !== null && faxRow.group_id !== undefined;
+            const sql = hasGroup ? 'UPDATE faxes SET assigned_department_id = ? WHERE group_id = ?' : 'UPDATE faxes SET assigned_department_id = ? WHERE id = ?';
+            const params = hasGroup ? [department_id, faxRow.group_id] : [department_id, faxId];
+            db.run(sql, params, function(updateErr) {
+                if (updateErr) {
+                    return res.status(500).json({ error: 'Database error' });
+                }
+                return res.json({ message: 'Fax assigned successfully' });
+            });
         });
     });
 });
@@ -724,7 +815,7 @@ app.patch('/api/users/:id/role', authenticateToken, (req, res) => {
     const userId = parseInt(req.params.id, 10);
     const { role } = req.body;
     
-    if (!role || !['admin', 'manager', 'user', 'faxes'].includes(role)) {
+    if (!role || !['admin', 'manager', 'user', 'faxes', 'فاكسات'].includes(role)) {
         return res.status(400).json({ error: 'Valid role (admin, manager, user, or faxes) is required' });
     }
     

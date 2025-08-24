@@ -7,7 +7,7 @@ module.exports = {
     
     // JWT Configuration
     JWT_SECRET: process.env.JWT_SECRET,
-    JWT_EXPIRES_IN: '24h',
+    JWT_EXPIRES_IN: '6h',
     
     // Database Configuration
     DATABASE_PATH: './faxsign.db',
@@ -26,33 +26,27 @@ module.exports = {
     DEFAULT_ADMIN: {
         username: 'admin',
         email: 'admin@company.com',
-        password: 'admin123',
+        password: 'admin2025',
         full_name: 'System Administrator',
         role: 'admin'
     },
-    // Users with full fax visibility and assignment permissions
-    DEFAULT_PRIVILEGED_USERS: [
-        { username: 'manager1', email: 'manager1@company.com', password: 'manager123', full_name: 'Fax Manager One', role: 'manager' },
-        { username: 'manager2', email: 'manager2@company.com', password: 'manager123', full_name: 'Fax Manager Two', role: 'manager' },
-        { username: 'manager3', email: 'manager3@company.com', password: 'manager123', full_name: 'Fax Manager Three', role: 'manager' }
-    ],
     
     // Default fax upload user
     DEFAULT_FAX_USER: {
         username: 'faxuser',
-        email: 'fax@company.com',
-        password: 'fax123',
-        full_name: 'Fax Upload User',
-        role: 'faxes'
+        email: 'fax@gmail.com',
+        password: 'fax2025',
+        full_name: 'Fax User',
+        role: 'فاكسات'
     },
     
     // Departments
     DEFAULT_DEPARTMENTS: [
-        'Faxes',
-        'HR',
-        'Finance'
+        'فاكسات',
+        'افراد',
+        'عمليات',
     ],
-    FAX_UPLOAD_DEPARTMENT: 'Faxes',
+    FAX_UPLOAD_DEPARTMENT: 'فاكسات',
     
     // Application Settings
     APP_NAME: 'FaxSign',
@@ -62,9 +56,9 @@ module.exports = {
     PASSWORD_SALT_ROUNDS: 10,
     
     // CORS Settings
-    CORS_ORIGIN: '*', // Change this in production
+    CORS_ORIGIN: ['*'],
     
     // Session Settings
-    SESSION_TIMEOUT: 24 * 60 * 60 * 1000 // 24 hours in milliseconds
+    SESSION_TIMEOUT: 6 * 60 * 60 * 1000 // 6 hours in milliseconds
 };
 
