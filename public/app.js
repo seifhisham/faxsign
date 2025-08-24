@@ -467,8 +467,20 @@ function displayFaxes(faxes) {
         faxesList.innerHTML = '<div class="loading">No faxes found</div>';
         return;
     }
-    
-    faxesList.innerHTML = faxes.map(fax => {
+
+    // Group by group_id when present; otherwise treat each as its own group
+    const groups = new Map(); // key -> array of fax rows
+    for (const f of faxes) {
+        const key = f.group_id ? `g:${f.group_id}` : `id:${f.id}`;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(f);
+    }
+
+    const groupCards = [];
+    for (const [, items] of groups) {
+        // Sort items by received_date ascending to keep natural order
+        items.sort((a, b) => new Date(a.received_date) - new Date(b.received_date));
+        const fax = items[0]; // representative
         const assignedLabel = fax.assigned_department_name ? `Assigned to: ${fax.assigned_department_name}` : 'Unassigned';
         const isRestricted = (fax.permissions_count || 0) > 0;
         const visibilityLabel = isRestricted ? 'Restricted: Specific users only' : 'Visible to department';
@@ -518,7 +530,16 @@ function displayFaxes(faxes) {
         const statusAction = canChange
             ? `<button class="btn btn-confirm btn-sm" style="margin-left:8px" onclick="updateFaxStatus(${fax.id}, 'confirmed')"><i class="fas fa-check"></i> Confirm</button>`
             : '';
-        return `
+        // Previews: multiple for the group
+        const previewsHtml = items.map(item => `
+            <div id="fax-preview-${item.id}" class="fax-preview" 
+                 style="flex:0 0 200px; height:260px; margin-right:8px; border:1px solid #e2e8f0; border-radius:8px; overflow:hidden; background:#f8fafc; display:flex; align-items:center; justify-content:center; cursor:pointer;"
+                 onclick="maximizeFax(${item.id})">
+                <div style="padding:16px; color:#718096; font-size:14px;">Loading preview...</div>
+            </div>
+        `).join('');
+
+        groupCards.push(`
         <div class="card">
             <h3>Fax from ${fax.sender_name}</h3>
             <p><strong>Fax Number:</strong> ${fax.fax_number}</p>
@@ -529,8 +550,8 @@ function displayFaxes(faxes) {
                 <span id="fax-status-${fax.id}" class="status-badge status-${statusLower}">${statusIcon}<span style="margin-left:6px;">${statusLower}</span></span>
                 ${statusAction}
             </div>
-            <div id="fax-preview-${fax.id}" class="fax-preview" style="margin-top:12px; border:1px solid #e2e8f0; border-radius:8px; overflow:hidden; background:#f8fafc; display:flex; align-items:center; justify-content:center; cursor:pointer;" onclick="maximizeFax(${fax.id})">
-                <div style="padding:16px; color:#718096; font-size:14px;">Loading preview...</div>
+            <div style="margin-top:12px; display:flex; overflow:auto;">
+                ${previewsHtml}
             </div>
             ${assignControl}
             ${manageVisibility}
@@ -555,10 +576,12 @@ function displayFaxes(faxes) {
                     <div id="comment-msg-${fax.id}" class="comment-empty" style="display:none;"></div>
                 </div>
             </div>
-        </div>`;
-    }).join('');
+        </div>`);
+    }
 
-    // After rendering cards, load previews
+    faxesList.innerHTML = groupCards.join('');
+
+    // After rendering cards, load previews for all faxes in all groups
     faxes.forEach(f => loadFaxPreview(f.id));
 }
 
@@ -785,59 +808,87 @@ async function handleUpload(e) {
     const faxNumber = document.getElementById('faxNumber').value;
     const senderName = document.getElementById('senderName').value;
     const faxFileInput = document.getElementById('faxFile');
-    const faxFile = faxFileInput.files[0];
+    const files = Array.from(faxFileInput.files || []);
 
-    // Check if file is selected
-    if (!faxFile) {
-        showMessage('uploadMessage', 'Please select a fax file to upload.', 'error');
+    // Check if files are selected
+    if (!files.length) {
+        showMessage('uploadMessage', 'Please select at least one fax file to upload.', 'error');
         return;
     }
 
-    const formData = new FormData();
-    formData.append('fax_number', faxNumber);
-    formData.append('sender_name', senderName);
-    formData.append('fax', faxFile);
+    // Disable submit during upload
+    const form = document.getElementById('uploadForm');
+    const submitBtn = form && form.querySelector('button[type="submit"]');
+    if (submitBtn) submitBtn.disabled = true;
+
+    let success = 0;
+    let failures = [];
+    // Assign one group ID for this submission so the backend can group these files
+    const groupId = (window.crypto && typeof window.crypto.randomUUID === 'function')
+        ? window.crypto.randomUUID()
+        : `g-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
     try {
-        // Use the correct endpoint (likely /api/faxes)
-        const response = await fetch('/api/faxes/upload', {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${currentToken}`
-            },
-            body: formData
-        });
+        // Upload sequentially to avoid overwhelming server and preserve order
+        for (const file of files) {
+            const formData = new FormData();
+            formData.append('fax_number', faxNumber);
+            formData.append('sender_name', senderName);
+            formData.append('group_id', groupId);
+            formData.append('fax', file);
 
-        let data;
-        try {
-            data = await response.json();
-        } catch (jsonErr) {
-            data = { error: 'Unexpected server response.' };
+            const response = await fetch('/api/faxes/upload', {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${currentToken}` },
+                body: formData
+            });
+
+            let data = null;
+            try { data = await response.json(); } catch (_) { /* ignore */ }
+
+            if (response.ok) {
+                success += 1;
+            } else {
+                failures.push({ name: file.name, error: (data && data.error) || `${response.status}` });
+            }
         }
 
-        console.log('Upload response:', response, data); // Debug log
-
-        if (response.ok) {
-            showMessage('uploadMessage', 'Fax uploaded successfully!', 'success');
-            document.getElementById('uploadForm').reset();
-            loadFaxes();
+        if (success && failures.length === 0) {
+            showMessage('uploadMessage', `${success} file(s) uploaded successfully.`, 'success');
+        } else if (success && failures.length) {
+            const failList = failures.map(f => `${f.name} (${f.error})`).join(', ');
+            showMessage('uploadMessage', `${success} file(s) uploaded, ${failures.length} failed: ${failList}`, 'error');
         } else {
-            showMessage('uploadMessage', data.error || 'Upload failed. Please try again.', 'error');
+            const failList = failures.map(f => `${f.name} (${f.error})`).join(', ');
+            showMessage('uploadMessage', `All uploads failed: ${failList}`, 'error');
+        }
+
+        // Reset form and refresh if any succeeded
+        if (success) {
+            if (form) form.reset();
+            loadFaxes();
         }
     } catch (error) {
         console.error('Upload error:', error);
-        showMessage('uploadMessage', 'Upload failed. Please try again.', 'error');
+        showMessage('uploadMessage', 'Upload failed due to a network or server error.', 'error');
+    } finally {
+        if (submitBtn) submitBtn.disabled = false;
     }
 }
 
 
 function handleFileSelect(e) {
-    const file = e.target.files[0];
+    const files = Array.from(e.target.files || []);
     const fileNameSpan = document.getElementById('selectedFileName');
-    if (file && fileNameSpan) {
-        fileNameSpan.textContent = `Selected: ${file.name}`;
-    } else if (fileNameSpan) {
-        fileNameSpan.textContent = '';
+    if (fileNameSpan) {
+        if (!files.length) {
+            fileNameSpan.textContent = '';
+        } else if (files.length === 1) {
+            fileNameSpan.textContent = `Selected: ${files[0].name}`;
+        } else {
+            const names = files.slice(0, 3).map(f => f.name).join(', ');
+            fileNameSpan.textContent = `Selected ${files.length} files: ${names}${files.length > 3 ? ', ...' : ''}`;
+        }
     }
 }
 

@@ -111,9 +111,10 @@ db.serialize(() => {
         name TEXT UNIQUE NOT NULL
     )`);
 
-    // Attempt to add department columns if they don't exist
+    // Attempt to add department/group columns if they don't exist
     db.run(`ALTER TABLE users ADD COLUMN department_id INTEGER`, () => {});
     db.run(`ALTER TABLE faxes ADD COLUMN assigned_department_id INTEGER`, () => {});
+    db.run(`ALTER TABLE faxes ADD COLUMN group_id TEXT`, () => {});
 
     // Seed default departments
     if (Array.isArray(config.DEFAULT_DEPARTMENTS)) {
@@ -446,12 +447,13 @@ app.post('/api/faxes/upload', authenticateToken, upload.single('fax'), (req, res
         return res.status(403).json({ error: 'Only users with faxes, admin, or manager role can upload faxes' });
     }
     const { fax_number, sender_name } = req.body;
+    const group_id = (req.body && req.body.group_id) ? String(req.body.group_id) : null;
     // Store only the filename to avoid absolute/relative path inconsistencies
     const file_path = req.file.filename;
 
     db.run(
-        'INSERT INTO faxes (fax_number, sender_name, file_path, uploaded_by, assigned_department_id) VALUES (?, ?, ?, ?, ?)',
-        [fax_number, sender_name, file_path, req.user.id, req.user.department_id || null],
+        'INSERT INTO faxes (fax_number, sender_name, file_path, uploaded_by, assigned_department_id, group_id) VALUES (?, ?, ?, ?, ?, ?)',
+        [fax_number, sender_name, file_path, req.user.id, req.user.department_id || null, group_id],
         function(err) {
             if (err) {
                 return res.status(500).json({ error: 'Database error' });
