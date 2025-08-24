@@ -481,7 +481,7 @@ function displayFaxes(faxes) {
                         <option value="">Choose...</option>
                         ${availableDepartments.map(d => `<option value="${d.id}" ${fax.assigned_department_name===d.name?'selected':''}>${d.name}</option>`).join('')}
                     </select>
-                    <button class="btn btn-secondary" onclick="assignFaxDepartment(${fax.id})">Assign</button>
+                    <button class="btn btn-secondary btn-sm" onclick="assignFaxDepartment(${fax.id})">Assign</button>
                 </div>
             </div>`
             : '';
@@ -493,18 +493,29 @@ function displayFaxes(faxes) {
                     <span class="status-badge" style="background:${isRestricted?'#ebf8ff':'#f0fff4'}; color:${isRestricted?'#3182ce':'#38a169'};">${visibilityLabel}</span>
                 </div>
                 <div style="margin-top:8px;">
-                    <button class="btn btn-secondary" onclick="toggleVisibilityPanel(${fax.id})">Manage visibility</button>
+                    <button class="btn btn-secondary btn-sm" onclick="toggleVisibilityPanel(${fax.id})">Manage visibility</button>
                 </div>
                 <div id="vis-panel-${fax.id}" style="display:none; margin-top:10px; padding:10px; border:1px solid #e2e8f0; border-radius:8px;">
                     <div id="vis-users-${fax.id}" class="signer-list" style="max-height:200px; overflow:auto;">
                         <div class="loading">Loading users...</div>
                     </div>
                     <div style="margin-top:10px; display:flex; gap:8px;">
-                        <button class="btn" onclick="saveFaxVisibility(${fax.id})">Save</button>
-                        <button class="btn btn-secondary" onclick="document.getElementById('vis-panel-${fax.id}').style.display='none'">Cancel</button>
+                        <button class="btn btn-sm" onclick="saveFaxVisibility(${fax.id})">Save</button>
+                        <button class="btn btn-secondary btn-sm" onclick="document.getElementById('vis-panel-${fax.id}').style.display='none'">Cancel</button>
                     </div>
                 </div>
             </div>`
+            : '';
+        const hasExplicit = Number(fax.permissions_count || 0) > 0;
+        const sameDept = fax.assigned_department_id === (currentUser && currentUser.department_id);
+        const allowedByVisibility = hasExplicit ? !!fax.is_permitted : sameDept;
+        const statusLower = String(fax.status).toLowerCase();
+        const canChange = statusLower === 'pending';
+        const statusIcon = statusLower === 'pending'
+            ? '<i class="fas fa-hourglass-half" aria-hidden="true"></i>'
+            : (statusLower === 'confirmed' ? '<i class="fas fa-check-circle" aria-hidden="true"></i>' : '');
+        const statusAction = canChange
+            ? `<button class="btn btn-confirm btn-sm" style="margin-left:8px" onclick="updateFaxStatus(${fax.id}, 'confirmed')"><i class="fas fa-check"></i> Confirm</button>`
             : '';
         return `
         <div class="card">
@@ -513,7 +524,10 @@ function displayFaxes(faxes) {
             <p><strong>Received:</strong> ${new Date(fax.received_date).toLocaleDateString()}</p>
             <p><strong>Uploaded by:</strong> ${fax.uploaded_by_name}</p>
             <p><strong>${assignedLabel}</strong></p>
-            <span class="status-badge status-${fax.status}">${fax.status}</span>
+            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                <span id="fax-status-${fax.id}" class="status-badge status-${statusLower}">${statusIcon}<span style="margin-left:6px;">${statusLower}</span></span>
+                ${statusAction}
+            </div>
             <div id="fax-preview-${fax.id}" class="fax-preview" style="margin-top:12px; border:1px solid #e2e8f0; border-radius:8px; overflow:hidden; background:#f8fafc; display:flex; align-items:center; justify-content:center; cursor:pointer;" onclick="maximizeFax(${fax.id})">
                 <div style="padding:16px; color:#718096; font-size:14px;">Loading preview...</div>
             </div>
@@ -545,6 +559,33 @@ function displayFaxes(faxes) {
 
     // After rendering cards, load previews
     faxes.forEach(f => loadFaxPreview(f.id));
+}
+
+// Update fax status (pending -> confirmed) for privileged users
+async function updateFaxStatus(faxId, newStatus) {
+    const btn = event && event.target ? event.target : null;
+    if (btn) btn.disabled = true;
+    try {
+        const res = await fetch(`/api/faxes/${faxId}/status`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${currentToken}`
+            },
+            body: JSON.stringify({ status: newStatus })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            alert(data.error || 'Failed to update status');
+            return;
+        }
+        // Refresh the list to reflect status change and any derived UI
+        await loadFaxes();
+    } catch (e) {
+        alert('Network error while updating status');
+    } finally {
+        if (btn) btn.disabled = false;
+    }
 }
 
 // Toggle and load comments for a fax

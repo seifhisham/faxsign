@@ -101,6 +101,13 @@
             background: #718096;
         }
 
+        .btn-confirm {
+            background: linear-gradient(135deg, #38a169 0%, #2f855a 100%);
+            color: #fff;
+        }
+        .btn-confirm:hover { transform: translateY(-2px); filter: brightness(1.05); }
+        .btn:disabled { opacity: 0.7; cursor: not-allowed; }
+
         .main-content {
             display: none;
         }
@@ -176,6 +183,11 @@
         .status-pending {
             background: #fef5e7;
             color: #d69e2e;
+        }
+
+        .status-confirmed {
+            background: #e6fffa;
+            color: #2c7a7b;
         }
 
         .status-signed {
@@ -512,7 +524,7 @@
         .comment-actions { display:flex; gap:8px; margin-top:8px; }
 
         /* Utilities */
-        .btn-sm { padding: 8px 12px; font-size: 13px; }
+        .btn-sm { padding: 8px 12px; font-size: 13px; width: auto; }
         .btn-ghost { background: transparent; color:#4a5568; border:1px solid #e2e8f0; }
         .btn-ghost:hover { background:#f7fafc; }
         .input { padding:10px 12px; border:1px solid #cbd5e0; border-radius:8px; width:100%; font-size:14px; }

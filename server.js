@@ -204,6 +204,39 @@ const canUploadFaxes = (user) => user && user.role === 'faxes';
 // Routes
 
 // Authentication routes
+// Update fax status (allowed: pending -> confirmed). Authorization: any authenticated user
+app.post('/api/faxes/:id/status', authenticateToken, (req, res) => {
+    const faxId = parseInt(req.params.id, 10);
+    if (!Number.isInteger(faxId)) {
+        return res.status(400).json({ error: 'Invalid fax id' });
+    }
+    const newStatus = (req.body && req.body.status || '').toString().trim().toLowerCase();
+    if (!['pending', 'confirmed'].includes(newStatus)) {
+        return res.status(400).json({ error: 'Invalid status value' });
+    }
+    // Fetch current status
+    db.get('SELECT status FROM faxes WHERE id = ?', [faxId], (err, row) => {
+        if (err) {
+            console.error('[status] select error', err);
+            return res.status(500).json({ error: 'Database error' });
+        }
+        if (!row) return res.status(404).json({ error: 'Fax not found' });
+        const current = (row.status || '').toString();
+        if (current === newStatus) {
+            return res.json({ message: 'Status unchanged', status: current });
+        }
+        if (!(current === 'pending' && newStatus === 'confirmed')) {
+            return res.status(400).json({ error: 'Illegal status transition' });
+        }
+        db.run('UPDATE faxes SET status = ? WHERE id = ?', [newStatus, faxId], function(updErr) {
+            if (updErr) {
+                console.error('[status] update error', updErr);
+                return res.status(500).json({ error: 'Database error' });
+            }
+            return res.json({ message: 'Status updated', status: newStatus });
+        });
+    });
+});
 app.post('/api/auth/login', (req, res) => {
     const { username, password } = req.body;
 
@@ -447,13 +480,14 @@ app.get('/api/faxes', authenticateToken, (req, res) => {
                         u.full_name as uploaded_by_name, 
                         d.name as assigned_department_name,
                         (SELECT COUNT(*) FROM fax_permissions fp WHERE fp.fax_id = f.id) as permissions_count,
-                        (SELECT COUNT(*) FROM fax_comments c WHERE c.fax_id = f.id) as comments_count
+                        (SELECT COUNT(*) FROM fax_comments c WHERE c.fax_id = f.id) as comments_count,
+                        EXISTS(SELECT 1 FROM fax_permissions fp2 WHERE fp2.fax_id = f.id AND fp2.user_id = ?) as is_permitted
                  FROM faxes f
                  LEFT JOIN users u ON f.uploaded_by = u.id
                  LEFT JOIN departments d ON f.assigned_department_id = d.id
                  ${whereClause}
                  ORDER BY f.received_date DESC`;
-    db.all(sql, params, (err, faxes) => {
+    db.all(sql, params.concat([req.user.id]), (err, faxes) => {
         if (err) {
             return res.status(500).json({ error: 'Database error' });
         }
