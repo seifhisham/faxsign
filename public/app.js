@@ -347,7 +347,7 @@ function resetTabState() {
 function updateNavVisibility() {
     const uploadTab = document.querySelector(".nav-tabs .nav-tab[data-tab='upload']");
     const uploadTabAlt = Array.from(document.querySelectorAll('.nav-tab')).find(b => b.textContent.includes('Upload'));
-    const canUpload = currentUser && currentUser.role === 'faxes';
+    const canUpload = !!(currentUser && (currentUser.role === 'فاكسات' || currentUser.role === 'faxes'));
     const el = uploadTab || uploadTabAlt;
     if (el) {
         el.style.display = canUpload ? 'block' : 'none';
@@ -541,8 +541,8 @@ function displayFaxes(faxes) {
 
         groupCards.push(`
         <div class="card">
-            <h3>Fax from ${fax.sender_name}</h3>
-            <p><strong>Fax Number:</strong> ${fax.fax_number}</p>
+            <h3>Fax Recomendation ${fax.sender_name}</h3>
+            <p><strong>Fax From:</strong> ${fax.fax_number}</p>
             <p><strong>Received:</strong> ${new Date(fax.received_date).toLocaleDateString()}</p>
             <p><strong>Uploaded by:</strong> ${fax.uploaded_by_name}</p>
             <p><strong>${assignedLabel}</strong></p>
