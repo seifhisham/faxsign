@@ -684,10 +684,11 @@ app.delete('/api/departments/:id', authenticateToken, (req, res) => {
     });
 });
 
-// Assign fax to a department (privileged only)
+// Assign fax to a department (manager only)
 app.post('/api/faxes/:id/assign-department', authenticateToken, (req, res) => {
-    if (!isPrivileged(req.user)) {
-        return res.status(403).json({ error: 'Only managers or admins can assign faxes' });
+    // Business rule: Admins cannot assign faxes. Only managers can.
+    if (!req.user || req.user.role !== 'manager') {
+        return res.status(403).json({ error: 'Only managers can assign faxes' });
     }
     const faxId = parseInt(req.params.id, 10);
     const { department_id } = req.body;

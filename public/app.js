@@ -472,7 +472,8 @@ function displayFaxes(faxes) {
         const assignedLabel = fax.assigned_department_name ? `Assigned to: ${fax.assigned_department_name}` : 'Unassigned';
         const isRestricted = (fax.permissions_count || 0) > 0;
         const visibilityLabel = isRestricted ? 'Restricted: Specific users only' : 'Visible to department';
-        const assignControl = (isCurrentUserPrivileged && availableDepartments.length)
+        // Only managers can assign faxes (admins are explicitly excluded)
+        const assignControl = ((currentUser && currentUser.role === 'manager') && availableDepartments.length)
             ? `
             <div style="margin-top:10px;">
                 <label style="font-size:12px;color:#718096;">Assign to department</label>
@@ -975,6 +976,11 @@ async function loadDepartments() {
 }
 
 async function assignFaxDepartment(faxId) {
+    // Frontend guard: only managers can assign faxes
+    if (!currentUser || currentUser.role !== 'manager') {
+        alert('Only managers can assign faxes');
+        return;
+    }
     const select = document.getElementById(`assign-select-${faxId}`);
     if (!select || !select.value) {
         alert('Please choose a department');
@@ -1454,14 +1460,14 @@ function displayDepartmentsForManagement(departments) {
                     <div class="user-count">ID: ${dept.id}</div>
                 </div>
                 <div class="department-actions">
-                    <button class="edit-btn" onclick="toggleEditDepartment(${dept.id}, '${dept.name}')">Edit</button>
-                    <button class="delete-btn" onclick="deleteDepartment(${dept.id}, '${dept.name}')">Delete</button>
+                    <button type="button" class="edit-btn" onclick="toggleEditDepartment(${dept.id}, '${dept.name}')">Edit</button>
+                    <button type="button" class="delete-btn" onclick="deleteDepartment(${dept.id}, '${dept.name}')">Delete</button>
                 </div>
             </div>
             <div id="edit-form-${dept.id}" class="edit-form">
-                <input type="text" id="edit-dept-${dept.id}" value="${dept.name}" placeholder="Department name">
-                <button class="btn" onclick="updateDepartment(${dept.id})">Save</button>
-                <button class="btn btn-secondary" onclick="toggleEditDepartment(${dept.id})">Cancel</button>
+                <input type="text" id="edit-dept-${dept.id}" value="${dept.name}" placeholder="Department name" onkeydown="if(event.key==='Enter'){ event.preventDefault(); updateDepartment(${dept.id}); }">
+                <button type="button" class="btn btn-sm" onclick="updateDepartment(${dept.id})">Save</button>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="toggleEditDepartment(${dept.id})">Cancel</button>
             </div>
         </div>
     `).join('');
@@ -1486,7 +1492,7 @@ async function updateDepartment(deptId) {
     const newName = document.getElementById(`edit-dept-${deptId}`).value.trim();
     
     if (!newName) {
-        showMessage('departmentsList', 'Department name cannot be empty', 'error');
+        showMessage('departmentsMessage', 'Department name cannot be empty', 'error');
         return;
     }
     
@@ -1503,16 +1509,16 @@ async function updateDepartment(deptId) {
         const data = await response.json();
         
         if (response.ok) {
-            showMessage('departmentsList', 'Department updated successfully', 'success');
+            showMessage('departmentsMessage', 'Department updated successfully', 'success');
             toggleEditDepartment(deptId);
             loadDepartmentsForManagement();
             // Also reload departments for other parts of the app
             await loadDepartments();
         } else {
-            showMessage('departmentsList', data.error || 'Failed to update department', 'error');
+            showMessage('departmentsMessage', data.error || 'Failed to update department', 'error');
         }
     } catch (error) {
-        showMessage('departmentsList', 'Network error. Please try again.', 'error');
+        showMessage('departmentsMessage', 'Network error. Please try again.', 'error');
     }
 }
 
@@ -1532,15 +1538,15 @@ async function deleteDepartment(deptId, deptName) {
         const data = await response.json();
         
         if (response.ok) {
-            showMessage('departmentsList', 'Department deleted successfully', 'success');
+            showMessage('departmentsMessage', 'Department deleted successfully', 'success');
             loadDepartmentsForManagement();
             // Also reload departments for other parts of the app
             await loadDepartments();
         } else {
-            showMessage('departmentsList', data.error || 'Failed to delete department', 'error');
+            showMessage('departmentsMessage', data.error || 'Failed to delete department', 'error');
         }
     } catch (error) {
-        showMessage('departmentsList', 'Network error. Please try again.', 'error');
+        showMessage('departmentsMessage', 'Network error. Please try again.', 'error');
     }
 }
 
