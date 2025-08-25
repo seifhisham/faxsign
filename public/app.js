@@ -8,8 +8,126 @@ let isDrawing = false;
 let currentWorkflowId = null;
 let availableDepartments = [];
 
+// i18n state
+let I18N = { lang: 'en', dict: {} };
+
+function t(key, fallback) {
+    return (I18N.dict && I18N.dict[key]) || fallback || key;
+}
+
+async function loadTranslations(lang) {
+    try {
+        const res = await fetch(`/i18n/${lang}.json`, { cache: 'no-store' });
+        if (!res.ok) throw new Error('failed');
+        I18N.dict = await res.json();
+        I18N.lang = lang;
+        localStorage.setItem('lang', lang);
+        // direction
+        document.documentElement.lang = lang;
+        document.documentElement.dir = (lang === 'ar') ? 'rtl' : 'ltr';
+        // set selector value if present
+        const sel = document.getElementById('langSelect');
+        if (sel) sel.value = lang;
+        const selLogin = document.getElementById('langSelectLogin');
+        if (selLogin) selLogin.value = lang;
+        const selRegister = document.getElementById('langSelectRegister');
+        if (selRegister) selRegister.value = lang;
+        applyTranslations();
+    } catch (_) {
+        // fallback to English embedded keys if fetch fails
+        I18N.lang = lang;
+        applyTranslations();
+    }
+}
+
+function toggleEditUser(userId) {
+    const el = document.getElementById(`edit-user-${userId}`);
+    if (!el) return;
+    const now = el.style.display === 'none' || el.style.display === '' ? 'block' : 'none';
+    el.style.display = now;
+}
+
+async function updateUserBasic(userId) {
+    const full = document.getElementById(`edit-full-${userId}`).value.trim();
+    const username = document.getElementById(`edit-username-${userId}`).value.trim();
+    const email = document.getElementById(`edit-email-${userId}`).value.trim();
+    if (!full && !username && !email) {
+        showMessage('usersList', t('admin.users.no_fields','Nothing to update'), 'error');
+        return;
+    }
+    try {
+        const res = await fetch(`/api/users/${userId}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${currentToken}`
+            },
+            body: JSON.stringify({ full_name: full, username, email })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            showMessage('usersList', t('admin.users.updated','User updated successfully'), 'success');
+            toggleEditUser(userId);
+            setTimeout(() => loadUsersForManagement(), 800);
+        } else {
+            showMessage('usersList', data.error || t('admin.users.update_failed','Failed to update user'), 'error');
+        }
+    } catch (e) {
+        showMessage('usersList', t('errors.network_retry','Network error. Please try again.'), 'error');
+    }
+}
+
+async function deleteUser(userId, name) {
+    if (currentUser && currentUser.id === userId) {
+        showMessage('usersList', t('admin.users.cannot_delete_self','You cannot delete your own account'), 'error');
+        return;
+    }
+    if (!confirm(`${t('admin.users.delete_confirm_prefix','Are you sure you want to delete user')} "${name}"? ${t('admin.users.delete_confirm_suffix','This action cannot be undone.')}`)) {
+        return;
+    }
+    try {
+        const res = await fetch(`/api/users/${userId}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${currentToken}` }
+        });
+        const data = await res.json();
+        if (res.ok) {
+            showMessage('usersList', t('admin.users.deleted','User deleted successfully'), 'success');
+            setTimeout(() => loadUsersForManagement(), 800);
+        } else {
+            showMessage('usersList', data.error || t('admin.users.delete_failed','Failed to delete user'), 'error');
+        }
+    } catch (e) {
+        showMessage('usersList', t('errors.network_retry','Network error. Please try again.'), 'error');
+    }
+}
+
+function applyTranslations() {
+    // Static elements with data-i18n
+    document.querySelectorAll('[data-i18n]').forEach(el => {
+        const key = el.getAttribute('data-i18n');
+        if (!key) return;
+        // Preserve placeholders for inputs
+        if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
+            if (el.hasAttribute('placeholder')) {
+                const fb = el.getAttribute('placeholder') || '';
+                el.setAttribute('placeholder', t(key, fb));
+            } else {
+                el.value = t(key, el.value);
+            }
+        } else {
+            el.textContent = t(key, el.textContent);
+        }
+    });
+}
+
 // Initialize application
 document.addEventListener('DOMContentLoaded', function() {
+    // Initialize language
+    const saved = localStorage.getItem('lang');
+    const initialLang = saved || (navigator.language && navigator.language.toLowerCase().startsWith('ar') ? 'ar' : 'en');
+    loadTranslations(initialLang);
+
     // Check if user is already logged in
     const token = localStorage.getItem('token');
     if (token) {
@@ -42,7 +160,7 @@ async function loadFaxPreview(faxId) {
         const container = document.getElementById(`fax-preview-${faxId}`);
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            if (container) container.innerHTML = `<div style="padding:16px; color:#e53e3e;">${err.error || 'Failed to load preview'}</div>`;
+            if (container) container.innerHTML = `<div style="padding:16px; color:#e53e3e;">${err.error || t('errors.load_preview','Failed to load preview')}</div>`;
             return;
         }
         const blob = await res.blob();
@@ -52,7 +170,7 @@ async function loadFaxPreview(faxId) {
         renderPreview(faxId, meta);
     } catch (e) {
         const container = document.getElementById(`fax-preview-${faxId}`);
-        if (container) container.innerHTML = `<div style="padding:16px; color:#e53e3e;">Failed to load preview</div>`;
+        if (container) container.innerHTML = `<div style="padding:16px; color:#e53e3e;">${t('errors.load_preview','Failed to load preview')}</div>`;
     }
 }
 
@@ -62,9 +180,9 @@ function renderPreview(faxId, meta) {
     const isImage = meta.type && meta.type.startsWith('image/');
     // Compact preview: image or small iframe
     if (isImage) {
-        container.innerHTML = `<img src="${meta.url}" alt="Fax preview" style="display:block; width:100%; max-height:220px; object-fit:contain; background:white;" />`;
+        container.innerHTML = `<img src="${meta.url}" alt="${t('viewer.preview_alt','Fax preview')}" style="display:block; width:100%; max-height:220px; object-fit:contain; background:white;" />`;
     } else {
-        container.innerHTML = `<iframe src="${meta.url}" title="Fax preview" style="width:100%; height:220px; border:0; background:white;"></iframe>`;
+        container.innerHTML = `<iframe src="${meta.url}" title="${t('viewer.preview_alt','Fax preview')}" style="width:100%; height:220px; border:0; background:white;"></iframe>`;
     }
 }
 
@@ -99,10 +217,16 @@ function maximizeFax(faxId) {
 // Setup event listeners
 function setupEventListeners() {
     // Login form
-    document.getElementById('loginFormElement').addEventListener('submit', handleLogin);
+    const loginFormEl = document.getElementById('loginFormElement');
+    if (loginFormEl) {
+        loginFormEl.addEventListener('submit', handleLogin);
+    }
     
     // Upload form
-    document.getElementById('uploadForm').addEventListener('submit', handleUpload);
+    const uploadForm = document.getElementById('uploadForm');
+    if (uploadForm) {
+        uploadForm.addEventListener('submit', handleUpload);
+    }
     
     // Workflow form (removed tab) - guard in case element doesn't exist
     const wfForm = document.getElementById('workflowForm');
@@ -111,15 +235,51 @@ function setupEventListeners() {
     }
     
     // File upload
-    document.getElementById('faxFile').addEventListener('change', handleFileSelect);
+    const faxFile = document.getElementById('faxFile');
+    if (faxFile) {
+        faxFile.addEventListener('change', handleFileSelect);
+    }
     
     // Department form
-    document.getElementById('addDepartmentForm').addEventListener('submit', handleAddDepartment);
+    const addDeptForm = document.getElementById('addDepartmentForm');
+    if (addDeptForm) {
+        addDeptForm.addEventListener('submit', handleAddDepartment);
+    }
+
+    // Language selector (main header)
+    const langSelect = document.getElementById('langSelect');
+    if (langSelect) {
+        langSelect.addEventListener('change', (e) => {
+            const lang = e.target.value || 'en';
+            loadTranslations(lang);
+            // After changing language, re-render lists to update dynamic strings
+            if (currentToken) {
+                loadFaxes();
+            }
+        });
+    }
+    // Language selector (login form)
+    const langSelectLogin = document.getElementById('langSelectLogin');
+    if (langSelectLogin) {
+        langSelectLogin.addEventListener('change', (e) => {
+            const lang = e.target.value || 'en';
+            loadTranslations(lang);
+        });
+    }
+    // Language selector (register page)
+    const langSelectRegister = document.getElementById('langSelectRegister');
+    if (langSelectRegister) {
+        langSelectRegister.addEventListener('change', (e) => {
+            const lang = e.target.value || 'en';
+            loadTranslations(lang);
+        });
+    }
 }
 
 // Setup signature canvas
 function setupSignatureCanvas() {
     signatureCanvas = document.getElementById('signatureCanvas');
+    if (!signatureCanvas) return;
     signatureContext = signatureCanvas.getContext('2d');
     
     signatureCanvas.addEventListener('mousedown', startDrawing);
@@ -165,7 +325,7 @@ async function handleLogin(e) {
             showLoginError(data.error);
         }
     } catch (error) {
-        showLoginError('Network error. Please try again.');
+        showLoginError(t('errors.network_retry','Network error. Please try again.'));
     }
 }
 
@@ -448,14 +608,15 @@ async function loadFaxes() {
             let data = null;
             try { data = await response.json(); } catch (_) {}
             if (faxesList) {
-                faxesList.innerHTML = `<div class="error">Failed to load faxes: ${data && data.error ? data.error : response.status}</div>`;
+                const base = t('errors.load_faxes','Failed to load faxes');
+                faxesList.innerHTML = `<div class="error">${base}: ${data && data.error ? data.error : response.status}</div>`;
             }
         }
     } catch (error) {
         console.error('Error loading faxes:', error);
         const faxesList = document.getElementById('faxesList');
         if (faxesList) {
-            faxesList.innerHTML = `<div class="error">Network error while loading faxes</div>`;
+            faxesList.innerHTML = `<div class="error">${t('errors.network','Network error')} ${t('errors.load_faxes_suffix','while loading faxes')}</div>`;
         }
     }
 }
@@ -464,7 +625,7 @@ function displayFaxes(faxes) {
     const faxesList = document.getElementById('faxesList');
     
     if (faxes.length === 0) {
-        faxesList.innerHTML = '<div class="loading">No faxes found</div>';
+        faxesList.innerHTML = `<div class="loading">${t('list.empty','No faxes found')}</div>`;
         return;
     }
 
@@ -481,40 +642,40 @@ function displayFaxes(faxes) {
         // Sort items by received_date ascending to keep natural order
         items.sort((a, b) => new Date(a.received_date) - new Date(b.received_date));
         const fax = items[0]; // representative
-        const assignedLabel = fax.assigned_department_name ? `Assigned to: ${fax.assigned_department_name}` : 'Unassigned';
+        const assignedLabel = fax.assigned_department_name ? `${t('labels.assigned_to','Assigned to:')} ${fax.assigned_department_name}` : t('labels.unassigned','Unassigned');
         const isRestricted = (fax.permissions_count || 0) > 0;
-        const visibilityLabel = isRestricted ? 'Restricted: Specific users only' : 'Visible to department';
+        const visibilityLabel = isRestricted ? t('visibility.restricted','Restricted: Specific users only') : t('visibility.department','Visible to department');
         // Only managers can assign faxes (admins are explicitly excluded)
         const assignControl = ((currentUser && currentUser.role === 'manager') && availableDepartments.length)
             ? `
             <div style="margin-top:10px;">
-                <label style="font-size:12px;color:#718096;">Assign to department</label>
+                <label style="font-size:12px;color:#718096;">${t('assign.to_department','Assign to department')}</label>
                 <div style="display:flex;gap:8px;">
                     <select id="assign-select-${fax.id}">
-                        <option value="">Choose...</option>
+                        <option value="">${t('assign.choose','Choose...')}</option>
                         ${availableDepartments.map(d => `<option value="${d.id}" ${fax.assigned_department_name===d.name?'selected':''}>${d.name}</option>`).join('')}
                     </select>
-                    <button class="btn btn-secondary btn-sm" onclick="assignFaxDepartment(${fax.id})">Assign</button>
+                    <button class="btn btn-secondary btn-sm" onclick="assignFaxDepartment(${fax.id})">${t('assign.button','Assign')}</button>
                 </div>
             </div>`
             : '';
         const manageVisibility = (currentUser && currentUser.role === 'manager')
             ? `
             <div style="margin-top:10px;">
-                <label style="font-size:12px;color:#718096;">Visibility</label>
+                <label style="font-size:12px;color:#718096;">${t('visibility.title','Visibility')}</label>
                 <div>
                     <span class="status-badge" style="background:${isRestricted?'#ebf8ff':'#f0fff4'}; color:${isRestricted?'#3182ce':'#38a169'};">${visibilityLabel}</span>
                 </div>
                 <div style="margin-top:8px;">
-                    <button class="btn btn-secondary btn-sm" onclick="toggleVisibilityPanel(${fax.id})">Manage visibility</button>
+                    <button class="btn btn-secondary btn-sm" onclick="toggleVisibilityPanel(${fax.id})">${t('visibility.manage','Manage visibility')}</button>
                 </div>
                 <div id="vis-panel-${fax.id}" style="display:none; margin-top:10px; padding:10px; border:1px solid #e2e8f0; border-radius:8px;">
                     <div id="vis-users-${fax.id}" class="signer-list" style="max-height:200px; overflow:auto;">
-                        <div class="loading">Loading users...</div>
+                        <div class="loading">${t('loading.users','Loading users...')}</div>
                     </div>
                     <div style="margin-top:10px; display:flex; gap:8px;">
-                        <button class="btn btn-sm" onclick="saveFaxVisibility(${fax.id})">Save</button>
-                        <button class="btn btn-secondary btn-sm" onclick="document.getElementById('vis-panel-${fax.id}').style.display='none'">Cancel</button>
+                        <button class="btn btn-sm" onclick="saveFaxVisibility(${fax.id})">${t('visibility.save','Save')}</button>
+                        <button class="btn btn-secondary btn-sm" onclick="document.getElementById('vis-panel-${fax.id}').style.display='none'">${t('visibility.cancel','Cancel')}</button>
                     </div>
                 </div>
             </div>`
@@ -528,26 +689,26 @@ function displayFaxes(faxes) {
             ? '<i class="fas fa-hourglass-half" aria-hidden="true"></i>'
             : (statusLower === 'confirmed' ? '<i class="fas fa-check-circle" aria-hidden="true"></i>' : '');
         const statusAction = canChange
-            ? `<button class="btn btn-confirm btn-sm" style="margin-left:8px" onclick="updateFaxStatus(${fax.id}, 'confirmed')"><i class="fas fa-check"></i> Confirm</button>`
+            ? `<button class="btn btn-confirm btn-sm" style="margin-left:8px" onclick="updateFaxStatus(${fax.id}, 'confirmed', this)"><i class="fas fa-check"></i> ${t('actions.confirm','Confirm')}</button>`
             : '';
         // Previews: multiple for the group
         const previewsHtml = items.map(item => `
             <div id="fax-preview-${item.id}" class="fax-preview" 
                  style="flex:0 0 200px; height:260px; margin-right:8px; border:1px solid #e2e8f0; border-radius:8px; overflow:hidden; background:#f8fafc; display:flex; align-items:center; justify-content:center; cursor:pointer;"
                  onclick="maximizeFax(${item.id})">
-                <div style="padding:16px; color:#718096; font-size:14px;">Loading preview...</div>
+                <div style="padding:16px; color:#718096; font-size:14px;">${t('preview.loading','Loading preview...')}</div>
             </div>
         `).join('');
 
         groupCards.push(`
         <div class="card">
-            <h3>Fax Recomendation ${fax.sender_name}</h3>
-            <p><strong>Fax From:</strong> ${fax.fax_number}</p>
-            <p><strong>Received:</strong> ${new Date(fax.received_date).toLocaleDateString()}</p>
-            <p><strong>Uploaded by:</strong> ${fax.uploaded_by_name}</p>
+            <h3>${t('card.title','Fax Recommendation')} ${fax.sender_name}</h3>
+            <p><strong>${t('labels.fax_from','Fax From:')}</strong> ${fax.fax_number}</p>
+            <p><strong>${t('labels.received','Received:')}</strong> ${new Date(fax.received_date).toLocaleDateString()}</p>
+            <p><strong>${t('labels.uploaded_by','Uploaded by:')}</strong> ${fax.uploaded_by_name}</p>
             <p><strong>${assignedLabel}</strong></p>
             <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-                <span id="fax-status-${fax.id}" class="status-badge status-${statusLower}">${statusIcon}<span style="margin-left:6px;">${statusLower}</span></span>
+                <span id="fax-status-${fax.id}" class="status-badge status-${statusLower}">${statusIcon}<span style="margin-left:6px;">${statusLower === 'pending' ? t('status.pending','pending') : (statusLower === 'confirmed' ? t('status.confirmed','confirmed') : statusLower)}</span></span>
                 ${statusAction}
             </div>
             <div style="margin-top:12px; display:flex; overflow:auto;">
@@ -560,18 +721,18 @@ function displayFaxes(faxes) {
                 <div class="comments-header">
                     <div class="comments-title">
                         <i class="fas fa-comments" style="color:#667eea;"></i>
-                        <span>Comments</span>
+                        <span>${t('comments.title','Comments')}</span>
                         <span id="comments-count-${fax.id}" class="comments-count">${Number(fax.comments_count || 0)}</span>
                     </div>
-                    <button class="btn btn-ghost btn-sm comments-toggle" id="comments-toggle-${fax.id}" onclick="toggleFaxComments(${fax.id})">Show</button>
+                    <button class="btn btn-ghost btn-sm comments-toggle" id="comments-toggle-${fax.id}" onclick="toggleFaxComments(${fax.id})">${t('comments.show','Show')}</button>
                 </div>
                 <div id="comments-section-${fax.id}" class="comments-body" style="display:none;">
                     <div id="comments-list-${fax.id}" class="comments-list">
-                        <div class="comment-empty">No comments yet</div>
+                        <div class="comment-empty">${t('comments.none','No comments yet')}</div>
                     </div>
                     <div class="comment-actions">
-                        <input id="comment-input-${fax.id}" class="input" type="text" maxlength="2000" placeholder="Add a comment..." />
-                        <button class="btn btn-sm" id="comment-btn-${fax.id}" onclick="addFaxComment(${fax.id})">Add</button>
+                        <input id="comment-input-${fax.id}" class="input" type="text" maxlength="2000" placeholder="${t('comments.add_placeholder','Add a comment...')}" />
+                        <button class="btn btn-sm" id="comment-btn-${fax.id}" onclick="addFaxComment(${fax.id})">${t('comments.add_button','Add')}</button>
                     </div>
                     <div id="comment-msg-${fax.id}" class="comment-empty" style="display:none;"></div>
                 </div>
@@ -585,9 +746,8 @@ function displayFaxes(faxes) {
     faxes.forEach(f => loadFaxPreview(f.id));
 }
 
-// Update fax status (pending -> confirmed) for privileged users
-async function updateFaxStatus(faxId, newStatus) {
-    const btn = event && event.target ? event.target : null;
+// Update fax status (e.g., confirm)
+async function updateFaxStatus(faxId, newStatus, btn) {
     if (btn) btn.disabled = true;
     try {
         const res = await fetch(`/api/faxes/${faxId}/status`, {
@@ -600,13 +760,13 @@ async function updateFaxStatus(faxId, newStatus) {
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
-            alert(data.error || 'Failed to update status');
+            alert(data.error || t('errors.update_status','Failed to update status'));
             return;
         }
         // Refresh the list to reflect status change and any derived UI
         await loadFaxes();
     } catch (e) {
-        alert('Network error while updating status');
+        alert(t('errors.network','Network error'));
     } finally {
         if (btn) btn.disabled = false;
     }
@@ -621,10 +781,10 @@ async function toggleFaxComments(faxId) {
     if (willShow) {
         sec.style.display = 'block';
         await loadFaxComments(faxId);
-        if (btn) btn.textContent = 'Hide';
+        if (btn) btn.textContent = t('comments.hide','Hide');
     } else {
         sec.style.display = 'none';
-        if (btn) btn.textContent = 'Show';
+        if (btn) btn.textContent = t('comments.show','Show');
     }
 }
 
@@ -649,7 +809,7 @@ function getInitials(name) {
 async function loadFaxComments(faxId) {
     const list = document.getElementById(`comments-list-${faxId}`);
     if (!list) return;
-    list.innerHTML = '<div class="comment-loading">Loading comments...</div>';
+    list.innerHTML = `<div class="comment-loading">${t('loading.comments','Loading comments...')}</div>`;
     try {
         const res = await fetch(`/api/faxes/${faxId}/comments`, { headers: { 'Authorization': `Bearer ${currentToken}` } });
         if (!res.ok) {
@@ -668,11 +828,11 @@ async function loadFaxComments(faxId) {
         const comments = await res.json();
         if (!Array.isArray(comments)) {
             console.error('[comments] unexpected payload', comments);
-            list.innerHTML = '<div class="comment-error">Failed to load comments: invalid server response</div>';
+            list.innerHTML = `<div class="comment-error">${t('errors.load_comments_invalid','Failed to load comments: invalid server response')}</div>`;
             return;
         }
         if (comments.length === 0) {
-            list.innerHTML = '<div class="comment-empty">No comments yet</div>';
+            list.innerHTML = `<div class="comment-empty">${t('comments.none','No comments yet')}</div>`;
             updateCommentsCount(faxId, 0);
             return;
         }
@@ -689,11 +849,11 @@ async function loadFaxComments(faxId) {
             console.debug('[comments] loaded', { faxId, count: comments.length });
         } catch (renderErr) {
             console.error('[comments] render error', renderErr);
-            list.innerHTML = `<div class=\"comment-error\">Failed to render comments: ${renderErr && renderErr.message ? renderErr.message : 'unknown error'}</div>`;
+            list.innerHTML = `<div class=\"comment-error\">${t('errors.render_comments','Failed to render comments')}: ${renderErr && renderErr.message ? renderErr.message : 'unknown error'}</div>`;
         }
     } catch (e) {
         console.error('[comments] load exception', e);
-        const msg = (e && e.message) ? `Failed to load comments: ${e.message}` : 'Failed to load comments';
+        const msg = (e && e.message) ? `${t('errors.load_comments','Failed to load comments')}: ${e.message}` : t('errors.load_comments','Failed to load comments');
         list.innerHTML = `<div class="comment-error">${msg}</div>`;
     }
 }
@@ -705,7 +865,7 @@ async function addFaxComment(faxId) {
     if (!input || !btn) return;
     const text = (input.value || '').trim();
     if (!text) {
-        if (msg) { msg.style.display = 'block'; msg.className = 'comment-error'; msg.textContent = 'Comment cannot be empty.'; }
+        if (msg) { msg.style.display = 'block'; msg.className = 'comment-error'; msg.textContent = t('comments.empty','Comment cannot be empty.'); }
         return;
     }
     btn.disabled = true;
@@ -718,14 +878,14 @@ async function addFaxComment(faxId) {
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
-            if (msg) { msg.style.display = 'block'; msg.className = 'comment-error'; msg.textContent = data.error || 'Failed to add comment'; }
+            if (msg) { msg.style.display = 'block'; msg.className = 'comment-error'; msg.textContent = data.error || t('comments.add_failed','Failed to add comment'); }
             return;
         }
         input.value = '';
-        if (msg) { msg.style.display = 'block'; msg.className = 'comment-success'; msg.textContent = 'Comment added.'; }
+        if (msg) { msg.style.display = 'block'; msg.className = 'comment-success'; msg.textContent = t('comments.added','Comment added.'); }
         await loadFaxComments(faxId);
     } catch (e) {
-        if (msg) { msg.style.display = 'block'; msg.className = 'comment-error'; msg.textContent = 'Network error.'; }
+        if (msg) { msg.style.display = 'block'; msg.className = 'comment-error'; msg.textContent = t('errors.network','Network error'); }
     } finally {
         btn.disabled = false;
     }
@@ -767,7 +927,7 @@ function renderVisibilityPanel(faxId, permittedIds) {
     if (!usersBox) return;
     const users = (window.availableUsers || []).filter(u => u.role !== 'admin' && u.role !== 'manager');
     if (!users.length) {
-        usersBox.innerHTML = '<div class="loading">No users to select</div>';
+        usersBox.innerHTML = `<div class="loading">${t('loading.no_users','No users to select')}</div>`;
         return;
     }
     usersBox.innerHTML = users.map(u => {
@@ -792,13 +952,13 @@ async function saveFaxVisibility(faxId) {
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
-            alert(data.error || 'Failed to save visibility');
+            alert(data.error || t('visibility.save_failed','Failed to save visibility'));
             return;
         }
         // Refresh list to update badge
         await loadFaxes();
     } catch (e) {
-        alert('Failed to save visibility');
+        alert(t('visibility.save_failed','Failed to save visibility'));
     }
 }
 
@@ -812,7 +972,7 @@ async function handleUpload(e) {
 
     // Check if files are selected
     if (!files.length) {
-        showMessage('uploadMessage', 'Please select at least one fax file to upload.', 'error');
+        showMessage('uploadMessage', t('upload.no_files','Please select at least one fax file to upload.'), 'error');
         return;
     }
 
@@ -854,13 +1014,13 @@ async function handleUpload(e) {
         }
 
         if (success && failures.length === 0) {
-            showMessage('uploadMessage', `${success} file(s) uploaded successfully.`, 'success');
+            showMessage('uploadMessage', `${success} ${t('upload.files_uploaded_success','file(s) uploaded successfully.')}`, 'success');
         } else if (success && failures.length) {
             const failList = failures.map(f => `${f.name} (${f.error})`).join(', ');
-            showMessage('uploadMessage', `${success} file(s) uploaded, ${failures.length} failed: ${failList}`, 'error');
+            showMessage('uploadMessage', `${t('upload.partial_result_prefix','Upload result:')} ${success} ${t('upload.files_uploaded','file(s) uploaded')}, ${failures.length} ${t('upload.files_failed','failed')}: ${failList}`, 'error');
         } else {
             const failList = failures.map(f => `${f.name} (${f.error})`).join(', ');
-            showMessage('uploadMessage', `All uploads failed: ${failList}`, 'error');
+            showMessage('uploadMessage', `${t('upload.all_failed','All uploads failed')}: ${failList}`, 'error');
         }
 
         // Reset form and refresh if any succeeded
@@ -870,7 +1030,7 @@ async function handleUpload(e) {
         }
     } catch (error) {
         console.error('Upload error:', error);
-        showMessage('uploadMessage', 'Upload failed due to a network or server error.', 'error');
+        showMessage('uploadMessage', t('upload.failed_generic','Upload failed due to a network or server error.'), 'error');
     } finally {
         if (submitBtn) submitBtn.disabled = false;
     }
@@ -884,10 +1044,10 @@ function handleFileSelect(e) {
         if (!files.length) {
             fileNameSpan.textContent = '';
         } else if (files.length === 1) {
-            fileNameSpan.textContent = `Selected: ${files[0].name}`;
+            fileNameSpan.textContent = `${t('upload.selected_prefix','Selected')}: ${files[0].name}`;
         } else {
             const names = files.slice(0, 3).map(f => f.name).join(', ');
-            fileNameSpan.textContent = `Selected ${files.length} files: ${names}${files.length > 3 ? ', ...' : ''}`;
+            fileNameSpan.textContent = `${t('upload.selected_prefix','Selected')} ${files.length} ${t('upload.files','files')}: ${names}${files.length > 3 ? ', ...' : ''}`;
         }
     }
 }
@@ -914,7 +1074,7 @@ function displayWorkflows(workflows) {
     const workflowsList = document.getElementById('workflowsList');
     
     if (workflows.length === 0) {
-        workflowsList.innerHTML = '<div class="loading">No workflows found</div>';
+        workflowsList.innerHTML = `<div class="loading">${t('workflow.none','No workflows found')}</div>`;
         return;
     }
     
@@ -925,7 +1085,7 @@ function displayWorkflows(workflows) {
             <p><strong>Created by:</strong> ${workflow.created_by_name}</p>
             <p><strong>Created:</strong> ${new Date(workflow.created_at).toLocaleDateString()}</p>
             <span class="status-badge status-${workflow.status}">${workflow.status}</span>
-            <button class="btn" onclick="viewWorkflowDetails(${workflow.id})">View Details</button>
+            <button class="btn" onclick="viewWorkflowDetails(${workflow.id})">${t('workflow.view_details','View Details')}</button>
         </div>
     `).join('');
 }
@@ -955,19 +1115,19 @@ function displayWorkflowDetails(workflow) {
             <span>${signer.name} (${signer.email})</span>
             <span class="status-badge status-${signer.status}">${signer.status}</span>
             ${signer.status === 'pending' && signer.user_id === currentUser.id ? 
-                `<button class="btn" onclick="openSignatureModal(${workflow.id})">Sign Now</button>` : ''}
+                `<button class="btn" onclick="openSignatureModal(${workflow.id})">${t('workflow.sign_now','Sign Now')}</button>` : ''}
         </div>
     `).join('');
     
     workflowsList.innerHTML = `
         <div class="card">
             <h3>${workflow.workflow_name}</h3>
-            <p><strong>Fax:</strong> ${workflow.fax_number} (${workflow.sender_name})</p>
-            <p><strong>Created by:</strong> ${workflow.created_by_name}</p>
-            <p><strong>Created:</strong> ${new Date(workflow.created_at).toLocaleDateString()}</p>
-            <h4>Signers:</h4>
+            <p><strong>${t('labels.fax','Fax:')}</strong> ${workflow.fax_number} (${workflow.sender_name})</p>
+            <p><strong>${t('labels.created_by','Created by:')}</strong> ${workflow.created_by_name}</p>
+            <p><strong>${t('labels.created','Created:')}</strong> ${new Date(workflow.created_at).toLocaleDateString()}</p>
+            <h4>${t('workflow.signers','Signers:')}</h4>
             ${signersHtml}
-            <button class="btn btn-secondary" onclick="loadWorkflows()">Back to Workflows</button>
+            <button class="btn btn-secondary" onclick="loadWorkflows()">${t('workflow.back','Back to Workflows')}</button>
         </div>
     `;
 }
@@ -983,7 +1143,7 @@ async function loadFaxesForWorkflow() {
         if (response.ok) {
             const faxes = await response.json();
             const select = document.getElementById('workflowFax');
-            select.innerHTML = '<option value="">Choose a fax...</option>';
+            select.innerHTML = `<option value="">${t('workflow.choose_fax','Choose a fax...')}</option>`;
             faxes.forEach(fax => {
                 select.innerHTML += `<option value="${fax.id}">${fax.sender_name} - ${fax.fax_number}</option>`;
             });
@@ -1029,12 +1189,12 @@ async function loadDepartments() {
 async function assignFaxDepartment(faxId) {
     // Frontend guard: only managers can assign faxes
     if (!currentUser || currentUser.role !== 'manager') {
-        alert('Only managers can assign faxes');
+        alert(t('assign.only_managers','Only managers can assign faxes'));
         return;
     }
     const select = document.getElementById(`assign-select-${faxId}`);
     if (!select || !select.value) {
-        alert('Please choose a department');
+        alert(t('assign.choose_department','Please choose a department'));
         return;
     }
     try {
@@ -1050,10 +1210,10 @@ async function assignFaxDepartment(faxId) {
         if (response.ok) {
             loadFaxes();
         } else {
-            alert(data.error || 'Failed to assign');
+            alert(data.error || t('assign.failed','Failed to assign'));
         }
     } catch (e) {
-        alert('Failed to assign department');
+        alert(t('assign.failed_department','Failed to assign department'));
     }
 }
 
@@ -1065,12 +1225,12 @@ function addSigner() {
     signerDiv.className = 'signer-item';
     signerDiv.innerHTML = `
         <select class="signer-user" required>
-            <option value="">Select user...</option>
+            <option value="">${t('workflow.select_user','Select user...')}</option>
             ${window.availableUsers ? window.availableUsers.map(user => 
                 `<option value="${user.id}" data-email="${user.email}" data-name="${user.full_name}">${user.full_name}</option>`
             ).join('') : ''}
         </select>
-        <button type="button" class="btn btn-secondary" onclick="this.parentElement.remove()">Remove</button>
+        <button type="button" class="btn btn-secondary" onclick="this.parentElement.remove()">${t('common.remove','Remove')}</button>
     `;
     
     signersList.appendChild(signerDiv);
@@ -1114,15 +1274,15 @@ async function handleCreateWorkflow(e) {
         const data = await response.json();
         
         if (response.ok) {
-            showMessage('workflowMessage', 'Workflow created successfully!', 'success');
+            showMessage('workflowMessage', t('workflow.created_success','Workflow created successfully!'), 'success');
             document.getElementById('workflowForm').reset();
             document.getElementById('signersList').innerHTML = '';
             loadWorkflows();
         } else {
-            showMessage('workflowMessage', data.error, 'error');
+            showMessage('workflowMessage', data.error || t('workflow.create_failed','Failed to create workflow. Please try again.'), 'error');
         }
     } catch (error) {
-        showMessage('workflowMessage', 'Failed to create workflow. Please try again.', 'error');
+        showMessage('workflowMessage', t('workflow.create_failed','Failed to create workflow. Please try again.'), 'error');
     }
 }
 
@@ -1143,7 +1303,7 @@ let currentFaxObjectUrl = null;
 let modalOwnsUrl = false; // true if the modal created the object URL and should revoke it
 let faxStatusTimeout = null;
 
-function setFaxViewerStatus(text = 'Loading...', show = true) {
+function setFaxViewerStatus(text = t('viewer.loading','Loading...'), show = true) {
     const s = document.getElementById('faxViewerStatus');
     if (!s) return;
     if (show) {
@@ -1161,7 +1321,7 @@ async function viewFax(faxId) {
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
             console.error('Open fax failed', { status: res.status, statusText: res.statusText, err });
-            alert(err.error || 'Failed to open fax');
+            alert(err.error || t('viewer.open_failed','Failed to open fax'));
             return;
         }
         const blob = await res.blob();
@@ -1201,12 +1361,12 @@ async function viewFax(faxId) {
         // Safety timeout to keep user informed
         if (faxStatusTimeout) clearTimeout(faxStatusTimeout);
         faxStatusTimeout = setTimeout(() => {
-            setFaxViewerStatus('Still loading...', true);
+            setFaxViewerStatus(t('viewer.still_loading','Still loading...'), true);
         }, 3000);
     } catch (e) {
         try { document.getElementById('faxViewerModal').style.display = 'none'; } catch {}
         console.error('Exception opening fax', e);
-        alert('Failed to open fax');
+        alert(t('viewer.open_failed','Failed to open fax'));
     }
 }
 
@@ -1301,12 +1461,12 @@ async function submitSignature() {
         if (response.ok) {
             closeSignatureModal();
             loadWorkflows();
-            alert('Document signed successfully!');
+            alert(t('workflow.signed_success','Document signed successfully!'));
         } else {
-            alert(data.error);
+            alert(data.error || t('workflow.submit_failed','Failed to submit signature. Please try again.'));
         }
     } catch (error) {
-        alert('Failed to submit signature. Please try again.');
+        alert(t('workflow.submit_failed','Failed to submit signature. Please try again.'));
     }
 }
 
@@ -1337,14 +1497,14 @@ function displayUsersForManagement(users) {
     }
     
     if (users.length === 0) {
-        usersList.innerHTML = '<div class="loading">No users found</div>';
+        usersList.innerHTML = `<div class="loading">${t('admin.users.none','No users found')}</div>`;
         return;
     }
     
     usersList.innerHTML = users.map(user => {
         const isCurrentUser = user.id === currentUser.id;
         const roleOptions = ['user', 'manager', 'admin', 'faxes'].map(role => 
-            `<option value="${role}" ${user.role === role ? 'selected' : ''}>${role}</option>`
+            `<option value="${role}" ${user.role === role ? 'selected' : ''}>${t(`roles.${role}`, role)}</option>`
         ).join('');
         
         const departmentOptions = availableDepartments.map(dept => 
@@ -1357,16 +1517,16 @@ function displayUsersForManagement(users) {
                 <div class="user-info">
                     <div class="user-name">${user.full_name}</div>
                     <div class="user-details">
-                        <strong>Username:</strong> ${user.username} | 
-                        <strong>Email:</strong> ${user.email} | 
-                        <strong>Current Role:</strong> 
-                        <span class="role-badge role-${user.role}">${user.role}</span>
+                        <strong>${t('admin.users.username','Username:')}</strong> ${user.username} | 
+                        <strong>${t('admin.users.email','Email:')}</strong> ${user.email} | 
+                        <strong>${t('admin.users.current_role','Current Role:')}</strong> 
+                        <span class="role-badge role-${user.role}">${t(`roles.${user.role}`, user.role)}</span>
                     </div>
                 </div>
                 <div class="role-selector">
                     <div style="display: flex; flex-direction: column; gap: 8px; align-items: flex-end;">
                         <div style="display: flex; align-items: center; gap: 10px;">
-                            <label style="font-size: 12px; color: #718096;">Role:</label>
+                            <label style="font-size: 12px; color: #718096;">${t('admin.users.role_label','Role:')}</label>
                             <select id="role-select-${user.id}" ${isCurrentUser ? 'disabled' : ''}>
                                 ${roleOptions}
                             </select>
@@ -1374,26 +1534,50 @@ function displayUsersForManagement(users) {
                                 class="update-btn" 
                                 onclick="updateUserRole(${user.id})" 
                                 ${isCurrentUser ? 'disabled' : ''}
-                                title="${isCurrentUser ? 'Cannot modify your own role' : 'Update user role'}"
+                                title="${isCurrentUser ? t('admin.users.cannot_modify','Cannot modify your own role') : t('admin.users.update_user_role','Update user role')}"
                             >
-                                ${isCurrentUser ? 'Current User' : 'Update Role'}
+                                ${isCurrentUser ? t('admin.users.current_user','Current User') : t('admin.users.update_role','Update Role')}
                             </button>
                         </div>
                         <div style="display: flex; align-items: center; gap: 10px;">
-                            <label style="font-size: 12px; color: #718096;">Department:</label>
+                            <label style="font-size: 12px; color: #718096;">${t('admin.users.department_label','Department:')}</label>
                             <select id="dept-select-${user.id}">
-                                <option value="">No Department</option>
+                                <option value="">${t('admin.users.no_department','No Department')}</option>
                                 ${departmentOptions}
                             </select>
                             <button 
                                 class="update-btn" 
                                 onclick="updateUserDepartment(${user.id})" 
-                                title="Update user department"
+                                title="${t('admin.users.update_department_title','Update user department')}"
                             >
-                                Update Department
+                                ${t('admin.users.update_department','Update Department')}
                             </button>
                         </div>
+                        <div style="display:flex; align-items:center; gap:10px; margin-top:6px;">
+                            <button type="button" class="edit-btn btn-sm" onclick="toggleEditUser(${user.id})">${t('admin.users.edit','Edit')}</button>
+                            <button type="button" class="delete-btn btn-sm" onclick="deleteUser(${user.id}, '${user.full_name.replace(/'/g, "\'")}')" ${isCurrentUser ? 'disabled' : ''}>${t('admin.users.delete','Delete')}</button>
+                        </div>
                     </div>
+                </div>
+            </div>
+            <div id="edit-user-${user.id}" class="edit-form" style="display:none; margin-top:12px;">
+                <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:10px;">
+                    <div>
+                        <label style="font-size:12px; color:#718096;">${t('admin.users.full_name','Full Name')}</label>
+                        <input type="text" id="edit-full-${user.id}" class="input" value="${user.full_name || ''}" placeholder="${t('admin.users.full_name_ph','Full name')}">
+                    </div>
+                    <div>
+                        <label style="font-size:12px; color:#718096;">${t('admin.users.username_label','Username')}</label>
+                        <input type="text" id="edit-username-${user.id}" class="input" value="${user.username || ''}" placeholder="${t('admin.users.username_ph','Username')}">
+                    </div>
+                    <div>
+                        <label style="font-size:12px; color:#718096;">${t('admin.users.email_label','Email')}</label>
+                        <input type="email" id="edit-email-${user.id}" class="input" value="${user.email || ''}" placeholder="${t('admin.users.email_ph','Email')}">
+                    </div>
+                </div>
+                <div style="display:flex; gap:8px; margin-top:10px;">
+                    <button type="button" class="btn btn-sm" onclick="updateUserBasic(${user.id})">${t('common.save','Save')}</button>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="toggleEditUser(${user.id})">${t('common.cancel','Cancel')}</button>
                 </div>
             </div>
         </div>`;
@@ -1418,7 +1602,7 @@ async function updateUserRole(userId) {
         
         if (response.ok) {
             // Show success message
-            showMessage('usersList', `Role updated successfully for user ID ${userId}`, 'success');
+            showMessage('usersList', t('admin.users.role_updated','Role updated successfully'), 'success');
             
             // Reload users to reflect changes
             setTimeout(() => {
@@ -1426,10 +1610,10 @@ async function updateUserRole(userId) {
             }, 1000);
         } else {
             // Show error message
-            showMessage('usersList', data.error || 'Failed to update role', 'error');
+            showMessage('usersList', data.error || t('admin.users.role_update_failed','Failed to update role'), 'error');
         }
     } catch (error) {
-        showMessage('usersList', 'Network error. Please try again.', 'error');
+        showMessage('usersList', t('errors.network_retry','Network error. Please try again.'), 'error');
     }
 }
 
@@ -1450,9 +1634,9 @@ async function updateUserDepartment(userId) {
         const data = await response.json();
         
         if (response.ok) {
-            // Show success message
-            const deptName = newDepartmentId ? availableDepartments.find(d => d.id === parseInt(newDepartmentId))?.name : 'No Department';
-            showMessage('usersList', `Department updated successfully for user ID ${userId} to ${deptName}`, 'success');
+            const deptSelect = document.getElementById(`dept-select-${userId}`);
+            const deptName = deptSelect && deptSelect.options[deptSelect.selectedIndex] ? deptSelect.options[deptSelect.selectedIndex].text : '';
+            showMessage('usersList', t('admin.users.department_updated','Department updated successfully'), 'success');
             
             // Reload users to reflect changes
             setTimeout(() => {
@@ -1460,10 +1644,10 @@ async function updateUserDepartment(userId) {
             }, 1000);
         } else {
             // Show error message
-            showMessage('usersList', data.error || 'Failed to update department', 'error');
+            showMessage('usersList', data.error || t('admin.users.department_update_failed','Failed to update department'), 'error');
         }
     } catch (error) {
-        showMessage('usersList', 'Network error. Please try again.', 'error');
+        showMessage('usersList', t('errors.network_retry','Network error. Please try again.'), 'error');
     }
 }
 
@@ -1499,7 +1683,7 @@ function displayDepartmentsForManagement(departments) {
     }
 
     if (departments.length === 0) {
-        departmentsList.innerHTML = '<div class="loading">No departments found</div>';
+        departmentsList.innerHTML = `<div class="loading">${t('admin.depts.none','No departments found')}</div>`;
         return;
     }
     
@@ -1508,17 +1692,17 @@ function displayDepartmentsForManagement(departments) {
             <div class="department-header">
                 <div>
                     <div class="department-name">${dept.name}</div>
-                    <div class="user-count">ID: ${dept.id}</div>
+                    <div class="user-count">${t('labels.id','ID:')} ${dept.id}</div>
                 </div>
                 <div class="department-actions">
-                    <button type="button" class="edit-btn" onclick="toggleEditDepartment(${dept.id}, '${dept.name}')">Edit</button>
-                    <button type="button" class="delete-btn" onclick="deleteDepartment(${dept.id}, '${dept.name}')">Delete</button>
+                    <button type="button" class="edit-btn" onclick="toggleEditDepartment(${dept.id}, '${dept.name}')">${t('admin.depts.edit','Edit')}</button>
+                    <button type="button" class="delete-btn" onclick="deleteDepartment(${dept.id}, '${dept.name}')">${t('admin.depts.delete','Delete')}</button>
                 </div>
             </div>
             <div id="edit-form-${dept.id}" class="edit-form">
-                <input type="text" id="edit-dept-${dept.id}" value="${dept.name}" placeholder="Department name" onkeydown="if(event.key==='Enter'){ event.preventDefault(); updateDepartment(${dept.id}); }">
-                <button type="button" class="btn btn-sm" onclick="updateDepartment(${dept.id})">Save</button>
-                <button type="button" class="btn btn-secondary btn-sm" onclick="toggleEditDepartment(${dept.id})">Cancel</button>
+                <input type="text" id="edit-dept-${dept.id}" value="${dept.name}" placeholder="${t('admin.depts.name_placeholder','Department name')}" onkeydown="if(event.key==='Enter'){ event.preventDefault(); updateDepartment(${dept.id}); }">
+                <button type="button" class="btn btn-sm" onclick="updateDepartment(${dept.id})">${t('common.save','Save')}</button>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="toggleEditDepartment(${dept.id})">${t('common.cancel','Cancel')}</button>
             </div>
         </div>
     `).join('');
@@ -1543,7 +1727,7 @@ async function updateDepartment(deptId) {
     const newName = document.getElementById(`edit-dept-${deptId}`).value.trim();
     
     if (!newName) {
-        showMessage('departmentsMessage', 'Department name cannot be empty', 'error');
+        showMessage('departmentsMessage', t('admin.depts.name_empty','Department name cannot be empty'), 'error');
         return;
     }
     
@@ -1560,21 +1744,21 @@ async function updateDepartment(deptId) {
         const data = await response.json();
         
         if (response.ok) {
-            showMessage('departmentsMessage', 'Department updated successfully', 'success');
+            showMessage('departmentsMessage', t('admin.depts.updated','Department updated successfully'), 'success');
             toggleEditDepartment(deptId);
             loadDepartmentsForManagement();
             // Also reload departments for other parts of the app
             await loadDepartments();
         } else {
-            showMessage('departmentsMessage', data.error || 'Failed to update department', 'error');
+            showMessage('departmentsMessage', data.error || t('admin.depts.update_failed','Failed to update department'), 'error');
         }
     } catch (error) {
-        showMessage('departmentsMessage', 'Network error. Please try again.', 'error');
+        showMessage('departmentsMessage', t('errors.network_retry','Network error. Please try again.'), 'error');
     }
 }
 
 async function deleteDepartment(deptId, deptName) {
-    if (!confirm(`Are you sure you want to delete the department "${deptName}"? This action cannot be undone.`)) {
+    if (!confirm(`${t('admin.depts.delete_confirm_prefix','Are you sure you want to delete the department')} "${deptName}"? ${t('admin.depts.delete_confirm_suffix','This action cannot be undone.')}`)) {
         return;
     }
     
@@ -1589,15 +1773,15 @@ async function deleteDepartment(deptId, deptName) {
         const data = await response.json();
         
         if (response.ok) {
-            showMessage('departmentsMessage', 'Department deleted successfully', 'success');
+            showMessage('departmentsMessage', t('admin.depts.deleted','Department deleted successfully'), 'success');
             loadDepartmentsForManagement();
             // Also reload departments for other parts of the app
             await loadDepartments();
         } else {
-            showMessage('departmentsMessage', data.error || 'Failed to delete department', 'error');
+            showMessage('departmentsMessage', data.error || t('admin.depts.delete_failed','Failed to delete department'), 'error');
         }
     } catch (error) {
-        showMessage('departmentsMessage', 'Network error. Please try again.', 'error');
+        showMessage('departmentsMessage', t('errors.network_retry','Network error. Please try again.'), 'error');
     }
 }
 
@@ -1607,7 +1791,7 @@ async function handleAddDepartment(e) {
     const deptName = document.getElementById('newDepartmentName').value.trim();
     
     if (!deptName) {
-        showMessage('addDepartmentMessage', 'Department name is required', 'error');
+        showMessage('addDepartmentMessage', t('admin.depts.name_required','Department name is required'), 'error');
         return;
     }
     
@@ -1624,16 +1808,16 @@ async function handleAddDepartment(e) {
         const data = await response.json();
         
         if (response.ok) {
-            showMessage('addDepartmentMessage', 'Department created successfully', 'success');
+            showMessage('addDepartmentMessage', t('admin.depts.created','Department created successfully'), 'success');
             document.getElementById('addDepartmentForm').reset();
             loadDepartmentsForManagement();
             // Also reload departments for other parts of the app
             await loadDepartments();
         } else {
-            showMessage('addDepartmentMessage', data.error || 'Failed to create department', 'error');
+            showMessage('addDepartmentMessage', data.error || t('admin.depts.create_failed','Failed to create department'), 'error');
         }
     } catch (error) {
-        showMessage('addDepartmentMessage', 'Network error. Please try again.', 'error');
+        showMessage('addDepartmentMessage', t('errors.network_retry','Network error. Please try again.'), 'error');
     }
 }
 

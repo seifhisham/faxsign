@@ -117,43 +117,77 @@
         .login-link a:hover {
             text-decoration: underline;
         }
+
+        /* Language selector styles to match login/app */
+        .lang-switch { display:flex; align-items:center; gap:8px; }
+        .lang-pill { display:flex; align-items:center; gap:8px; background:#fff; border:1px solid #cbd5e0; border-radius:999px; padding:6px 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.04); }
+        .lang-pill i { color:#4a5568; }
+        .lang-select { appearance:none; -webkit-appearance:none; -moz-appearance:none; border:none; background:transparent; padding:6px 24px 6px 4px; font-size:14px; color:#2d3748; cursor:pointer; min-width:140px; }
+        .lang-select:focus { outline:none; }
+        .lang-chev { pointer-events:none; color:#718096; font-size:12px; margin-left:-18px; }
     </style>
 </head>
 <body>
     <div class="register-container">
-        <h2><i class="fas fa-user-plus"></i> Create Account</h2>
+        <div style="display:flex; justify-content:flex-end; margin-bottom:12px;">
+            <div class="lang-switch">
+                <div class="lang-pill">
+                    <i class="fas fa-globe"></i>
+                    <select id="langSelectRegister" class="lang-select">
+                        <option value="en">English</option>
+                        <option value="ar">العربية</option>
+                    </select>
+                    <i class="fas fa-chevron-down lang-chev"></i>
+                </div>
+            </div>
+        </div>
+        <h2><i class="fas fa-user-plus"></i> <span data-i18n="register.title">Create Account</span></h2>
         <form id="registerForm">
             <div class="form-group">
-                <label for="fullName">Full Name</label>
+                <label for="fullName" data-i18n="register.full_name">Full Name</label>
                 <input type="text" id="fullName" name="fullName" required>
             </div>
             <div class="form-group">
-                <label for="username">Username</label>
+                <label for="username" data-i18n="register.username">Username</label>
                 <input type="text" id="username" name="username" required>
             </div>
             <div class="form-group">
-                <label for="email">Email</label>
+                <label for="email" data-i18n="register.email">Email</label>
                 <input type="email" id="email" name="email" required>
             </div>
             <div class="form-group">
-                <label for="password">Password</label>
+                <label for="password" data-i18n="register.password">Password</label>
                 <input type="password" id="password" name="password" required>
             </div>
             <div class="form-group">
-                <label for="confirmPassword">Confirm Password</label>
+                <label for="confirmPassword" data-i18n="register.confirm_password">Confirm Password</label>
                 <input type="password" id="confirmPassword" name="confirmPassword" required>
             </div>
-            <button type="submit" class="btn">Create Account</button>
+            <button type="submit" class="btn" data-i18n="register.create_button">Create Account</button>
         </form>
         
         <div id="message" class="error"></div>
         
         <div class="login-link">
-            Already have an account? <a href="/">Login here</a>
+            <span data-i18n="register.have_account">Already have an account?</span> <a href="/" data-i18n="register.login_here">Login here</a>
         </div>
     </div>
 
+    <script src="app.js"></script>
     <script>
+        // Sync register page language selector with i18n state
+        document.addEventListener('DOMContentLoaded', function() {
+            const saved = localStorage.getItem('lang') || 'en';
+            const sel = document.getElementById('langSelectRegister');
+            if (sel) {
+                sel.value = saved;
+                sel.addEventListener('change', (e) => {
+                    const lang = e.target.value || 'en';
+                    loadTranslations(lang);
+                });
+            }
+        });
+
         document.getElementById('registerForm').addEventListener('submit', async function(e) {
             e.preventDefault();
             
@@ -165,13 +199,13 @@
             
             // Validate passwords match
             if (password !== confirmPassword) {
-                showMessage('Passwords do not match!', 'error');
+                showMessage(t('register.errors.password_mismatch','Passwords do not match!'), 'error');
                 return;
             }
             
             // Validate password length
             if (password.length < 6) {
-                showMessage('Password must be at least 6 characters long!', 'error');
+                showMessage(t('register.errors.password_length','Password must be at least 6 characters long!'), 'error');
                 return;
             }
             
@@ -192,13 +226,13 @@
                 const data = await response.json();
                 
                 if (response.ok) {
-                    showMessage('Account created successfully! You can now login.', 'success');
+                    showMessage(t('register.success.account_created','Account created successfully! You can now login.'), 'success');
                     document.getElementById('registerForm').reset();
                 } else {
-                    showMessage(data.error, 'error');
+                    showMessage(data.error || t('register.errors.registration_failed','Registration failed. Please try again.'), 'error');
                 }
             } catch (error) {
-                showMessage('Registration failed. Please try again.', 'error');
+                showMessage(t('register.errors.registration_failed','Registration failed. Please try again.'), 'error');
             }
         });
         

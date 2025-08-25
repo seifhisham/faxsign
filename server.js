@@ -310,7 +310,6 @@ app.get('/api/faxes/:id/file', authenticateToken, (req, res) => {
             const uploadsRoot = uploadsAbs;
             // Preferred path: uploadsRoot + basename (works whether DB stores filename or full path)
             const preferredPath = path.join(uploadsRoot, path.basename(fax.file_path || ''));
-            console.log('[FAX FILE] id=%s stored=%s uploadsRoot=%s preferredPath=%s', faxId, fax.file_path, uploadsRoot, preferredPath);
             if (preferredPath && fs.existsSync(preferredPath)) {
                 return res.sendFile(preferredPath);
             }
@@ -326,10 +325,63 @@ app.get('/api/faxes/:id/file', authenticateToken, (req, res) => {
                 console.warn('[FAX FILE] Not found on disk (fallback)', { resolvedPath });
                 return res.status(404).json({ error: 'File not found' });
             }
-            console.log('[FAX FILE] Sending fallback path', { resolvedPath });
             return res.sendFile(resolvedPath);
         }
     );
+});
+
+// Update basic user info (admin only)
+app.put('/api/users/:id', authenticateToken, (req, res) => {
+    if (req.user.role !== 'admin') {
+        return res.status(403).json({ error: 'Only administrators can modify users' });
+    }
+    const userId = parseInt(req.params.id, 10);
+    const { username, email, full_name } = req.body || {};
+    const fields = [];
+    const params = [];
+    if (typeof username === 'string' && username.trim()) { fields.push('username = ?'); params.push(username.trim()); }
+    if (typeof email === 'string' && email.trim()) { fields.push('email = ?'); params.push(email.trim()); }
+    if (typeof full_name === 'string' && full_name.trim()) { fields.push('full_name = ?'); params.push(full_name.trim()); }
+    if (!fields.length) {
+        return res.status(400).json({ error: 'No valid fields to update' });
+    }
+    params.push(userId);
+    const sql = `UPDATE users SET ${fields.join(', ')} WHERE id = ?`;
+    db.run(sql, params, function(err) {
+        if (err) {
+            console.error('Update user error', err);
+            return res.status(500).json({ error: 'Failed to update user' });
+        }
+        // Return the updated user
+        db.get(`SELECT id, username, email, full_name, role, department_id FROM users WHERE id = ?`, [userId], (e, row) => {
+            if (e) {
+                return res.status(500).json({ error: 'Updated but failed to fetch user' });
+            }
+            if (!row) return res.status(404).json({ error: 'User not found' });
+            res.json(row);
+        });
+    });
+});
+
+// Delete user (admin only)
+app.delete('/api/users/:id', authenticateToken, (req, res) => {
+    if (req.user.role !== 'admin') {
+        return res.status(403).json({ error: 'Only administrators can delete users' });
+    }
+    const userId = parseInt(req.params.id, 10);
+    if (userId === req.user.id) {
+        return res.status(400).json({ error: 'You cannot delete your own account' });
+    }
+    db.run(`DELETE FROM users WHERE id = ?`, [userId], function(err) {
+        if (err) {
+            console.error('Delete user error', err);
+            return res.status(500).json({ error: 'Failed to delete user' });
+        }
+        if (this.changes === 0) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+        res.json({ success: true });
+    });
 });
 
 // Fax comments: list comments for a fax (user must have access to the fax)
