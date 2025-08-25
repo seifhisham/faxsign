@@ -310,7 +310,6 @@ app.get('/api/faxes/:id/file', authenticateToken, (req, res) => {
             const uploadsRoot = uploadsAbs;
             // Preferred path: uploadsRoot + basename (works whether DB stores filename or full path)
             const preferredPath = path.join(uploadsRoot, path.basename(fax.file_path || ''));
-            console.log('[FAX FILE] id=%s stored=%s uploadsRoot=%s preferredPath=%s', faxId, fax.file_path, uploadsRoot, preferredPath);
             if (preferredPath && fs.existsSync(preferredPath)) {
                 return res.sendFile(preferredPath);
             }
@@ -326,7 +325,6 @@ app.get('/api/faxes/:id/file', authenticateToken, (req, res) => {
                 console.warn('[FAX FILE] Not found on disk (fallback)', { resolvedPath });
                 return res.status(404).json({ error: 'File not found' });
             }
-            console.log('[FAX FILE] Sending fallback path', { resolvedPath });
             return res.sendFile(resolvedPath);
         }
     );

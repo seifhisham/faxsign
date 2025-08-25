@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FaxSign - Fax Signature Management</title>
+    <title data-i18n="app.title">FaxSign</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         * {
@@ -530,78 +530,112 @@
         .input { padding:10px 12px; border:1px solid #cbd5e0; border-radius:8px; width:100%; font-size:14px; }
         .input:focus { outline:none; border-color:#667eea; }
         .clickable { cursor: pointer; }
+
+        /* Language selector styles */
+        .lang-switch { display:flex; align-items:center; gap:8px; }
+        .lang-pill { display:flex; align-items:center; gap:8px; background:#fff; border:1px solid #cbd5e0; border-radius:999px; padding:6px 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.04); }
+        .lang-pill i { color:#4a5568; }
+        .lang-select { appearance:none; -webkit-appearance:none; -moz-appearance:none; border:none; background:transparent; padding:6px 24px 6px 4px; font-size:14px; color:#2d3748; cursor:pointer; min-width:140px; }
+        .lang-select:focus { outline:none; }
+        .lang-chev { pointer-events:none; color:#718096; font-size:12px; margin-left:-18px; }
     </style>
 </head>
 <body>
     <div class="container">
         <!-- Login Form -->
         <div id="loginForm" class="login-container">
-            <h2 style="text-align: center; margin-bottom: 30px; color: #4a5568;">FaxSign Login</h2>
+            <div style="display:flex; justify-content:flex-end; margin-bottom:12px;">
+                <div class="lang-switch">
+                    <div class="lang-pill">
+                        <i class="fas fa-globe"></i>
+                        <select id="langSelectLogin" class="lang-select">
+                            <option value="en">English</option>
+                            <option value="ar">العربية</option>
+                        </select>
+                        <i class="fas fa-chevron-down lang-chev"></i>
+                    </div>
+                </div>
+            </div>
+            <h2 style="text-align: center; margin-bottom: 30px; color: #4a5568;" data-i18n="login.title">FaxSign Login</h2>
             <form id="loginFormElement">
                 <div class="form-group">
-                    <label for="username">Username</label>
+                    <label for="username" data-i18n="login.username">Username</label>
                     <input type="text" id="username" name="username" required>
                 </div>
                 <div class="form-group">
-                    <label for="password">Password</label>
+                    <label for="password" data-i18n="login.password">Password</label>
                     <input type="password" id="password" name="password" required>
                 </div>
-                <button type="submit" class="btn">Login</button>
+                <button type="submit" class="btn" data-i18n="login.button">Login</button>
             </form>
             <div id="loginError" class="error" style="display: none;"></div>
             <div style="text-align: center; margin-top: 20px;">
-                <p style="color: #718096; margin-bottom: 10px;">Don't have an account?</p>
-                <a href="/register" style="color: #667eea; text-decoration: none; font-weight: 500;">Create Account</a>
+                <p style="color: #718096; margin-bottom: 10px;" data-i18n="login.no_account">Don't have an account?</p>
+                <a href="/register" style="color: #667eea; text-decoration: none; font-weight: 500;" data-i18n="login.create_account">Create Account</a>
             </div>
         </div>
 
         <!-- Main Application -->
         <div id="mainApp" class="main-content">
             <div class="header">
-                <h1><i class="fas fa-fax"></i> FaxSign</h1>
-                <p>Fax Signature Management System</p>
+                <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+                    <div>
+                        <h1><i class="fas fa-fax"></i> <span data-i18n="app.title">FaxSign</span></h1>
+                        <p data-i18n="app.subtitle">Fax Signature Management System</p>
+                    </div>
+                    <div class="lang-switch">
+                        <div class="lang-pill">
+                            <i class="fas fa-globe"></i>
+                            <select id="langSelect" class="lang-select">
+                                <option value="en">English</option>
+                                <option value="ar">العربية</option>
+                            </select>
+                            <i class="fas fa-chevron-down lang-chev"></i>
+                        </div>
+                    </div>
+                </div>
                 <div class="user-info">
-                    <span>Welcome, <span id="userName"></span></span>
-                    <button class="logout-btn" onclick="logout()">Logout</button>
+                    <span><span data-i18n="welcome">Welcome</span>, <span id="userName"></span></span>
+                    <button class="logout-btn" onclick="logout()" data-i18n="logout">Logout</button>
                 </div>
             </div>
 
             <!-- Navigation Tabs -->
             <div class="nav-tabs">
-                <button class="nav-tab active" data-tab="faxes" onclick="showTab('faxes', this)">Faxes</button>
-                <button class="nav-tab" data-tab="upload" onclick="showTab('upload', this)">Upload Fax</button>
-                <button class="nav-tab admin-only" data-tab="user-management" onclick="showTab('user-management', this)" style="display: none;">User Management</button>
-                <button class="nav-tab admin-only" data-tab="department-management" onclick="showTab('department-management', this)" style="display: none;">Department Management</button>
+                <button class="nav-tab active" data-tab="faxes" onclick="showTab('faxes', this)" data-i18n="tabs.faxes">Faxes</button>
+                <button class="nav-tab" data-tab="upload" onclick="showTab('upload', this)" data-i18n="tabs.upload">Upload Fax</button>
+                <button class="nav-tab admin-only" data-tab="user-management" onclick="showTab('user-management', this)" style="display: none;" data-i18n="tabs.user_mgmt">User Management</button>
+                <button class="nav-tab admin-only" data-tab="department-management" onclick="showTab('department-management', this)" style="display: none;" data-i18n="tabs.dept_mgmt">Department Management</button>
             </div>
 
             <!-- Faxes Tab -->
             <div id="faxes" class="tab-content active">
-                <h2>Received Faxes</h2>
+                <h2 data-i18n="faxes.header">Received Faxes</h2>
                 <div id="faxesList"></div>
             </div>
 
             <!-- Upload Fax Tab -->
             <div id="upload" class="tab-content">
-                <h2>Upload New Fax</h2>
+                <h2 data-i18n="upload.header">Upload New Fax</h2>
                 <form id="uploadForm">
                     <div class="form-group">
-                        <label for="faxNumber">Fax Number</label>
+                        <label for="faxNumber" data-i18n="upload.fax_number">Fax Number</label>
                         <input type="text" id="faxNumber" name="faxNumber" required>
                     </div>
                     <div class="form-group">
-                        <label for="senderName">Sender Name</label>
+                        <label for="senderName" data-i18n="upload.sender_name">Sender Name</label>
                         <input type="text" id="senderName" name="senderName" required>
                     </div>
                     <div class="form-group">
-                        <label>Fax Document</label>
+                        <label data-i18n="upload.fax_document">Fax Document</label>
                         <div class="file-upload" onclick="document.getElementById('faxFile').click()">
                             <i class="fas fa-cloud-upload-alt" style="font-size: 48px; color: #cbd5e0; margin-bottom: 10px;"></i>
-                            <p>Click to upload fax document(s) (PDF, JPEG, PNG, TIFF)</p>
+                            <p data-i18n="upload.choose_files">Click to upload fax document(s) (PDF, JPEG, PNG, TIFF)</p>
                             <input type="file" id="faxFile" name="fax" accept=".pdf,.jpg,.jpeg,.png,.tiff" multiple required>
                         <span id="selectedFileName" style="display:block; margin-top:8px; color:#38a169;"></span>
                         </div>
                     </div>
-                    <button type="submit" class="btn">Upload Fax</button>
+                    <button type="submit" class="btn" data-i18n="upload.button">Upload Fax</button>
                 </form>
                 <div id="uploadMessage"></div>
             </div>
@@ -609,31 +643,31 @@
 
             <!-- User Management Tab (Admin Only) -->
             <div id="user-management" class="tab-content">
-                <h2>User Management</h2>
+                <h2 data-i18n="admin.users.title">User Management</h2>
                 <div class="admin-warning" style="background: #fef5e7; color: #d69e2e; padding: 15px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #d69e2e;">
-                    <i class="fas fa-shield-alt"></i> <strong>Admin Panel:</strong> Only administrators can modify user roles and permissions.
+                    <i class="fas fa-shield-alt"></i> <strong data-i18n="admin.panel">Admin Panel:</strong> <span data-i18n="admin.users.warning">Only administrators can modify user roles and permissions.</span>
                 </div>
                 <div id="usersList"></div>
             </div>
 
             <!-- Department Management Tab (Admin Only) -->
             <div id="department-management" class="tab-content">
-                <h2>Department Management</h2>
+                <h2 data-i18n="admin.depts.title">Department Management</h2>
                 <div class="admin-warning" style="background: #fef5e7; color: #d69e2e; padding: 15px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #d69e2e;">
-                    <i class="fas fa-building"></i> <strong>Admin Panel:</strong> Only administrators can create, edit, and delete departments.
+                    <i class="fas fa-building"></i> <strong data-i18n="admin.panel">Admin Panel:</strong> <span data-i18n="admin.depts.warning">Only administrators can create, edit, and delete departments.</span>
                 </div>
                 <!-- Department status/messages -->
                 <div id="departmentsMessage" style="display:none;"></div>
                 
                 <!-- Add New Department Form -->
                 <div class="card" style="margin-bottom: 30px;">
-                    <h3>Add New Department</h3>
+                    <h3 data-i18n="admin.depts.add_new">Add New Department</h3>
                     <form id="addDepartmentForm">
                         <div class="form-group">
-                            <label for="newDepartmentName">Department Name</label>
-                            <input type="text" id="newDepartmentName" name="newDepartmentName" required placeholder="Enter department name">
+                            <label for="newDepartmentName" data-i18n="admin.depts.name_label">Department Name</label>
+                            <input type="text" id="newDepartmentName" name="newDepartmentName" required placeholder="Enter department name" data-i18n="admin.depts.name_placeholder">
                         </div>
-                        <button type="submit" class="btn">Create Department</button>
+                        <button type="submit" class="btn" data-i18n="admin.depts.create_button">Create Department</button>
                     </form>
                     <div id="addDepartmentMessage"></div>
                 </div>
@@ -647,12 +681,12 @@
     <!-- Signature Modal -->
     <div id="signatureModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000;">
         <div style="background: white; margin: 50px auto; padding: 30px; border-radius: 15px; max-width: 600px;">
-            <h3>Sign Document</h3>
+            <h3 data-i18n="signature.title">Sign Document</h3>
             <canvas id="signatureCanvas" class="signature-canvas" width="500" height="200"></canvas>
             <div style="margin-top: 20px;">
-                <button class="btn btn-secondary" onclick="clearSignature()">Clear</button>
-                <button class="btn" onclick="submitSignature()">Sign Document</button>
-                <button class="btn btn-secondary" onclick="closeSignatureModal()">Cancel</button>
+                <button class="btn btn-secondary" onclick="clearSignature()" data-i18n="signature.clear">Clear</button>
+                <button class="btn" onclick="submitSignature()" data-i18n="signature.sign">Sign Document</button>
+                <button class="btn btn-secondary" onclick="closeSignatureModal()" data-i18n="signature.cancel">Cancel</button>
             </div>
         </div>
     </div>
@@ -661,11 +695,11 @@
     <div id="faxViewerModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); z-index: 1100;">
         <div style="background: white; margin: 30px auto; padding: 10px; border-radius: 12px; max-width: 98%; max-height: 96%; display: flex; flex-direction: column; gap: 10px; overflow: hidden;">
             <div style="display:flex; justify-content: space-between; align-items:center; padding: 8px 12px;">
-                <h3 style="margin:0; color:#4a5568;">Fax Viewer</h3>
-                <button class="btn btn-secondary" onclick="closeFaxViewer()" style="width:auto;">Close</button>
+                <h3 style="margin:0; color:#4a5568;" data-i18n="viewer.title">Fax Viewer</h3>
+                <button class="btn btn-secondary" onclick="closeFaxViewer()" style="width:auto;" data-i18n="viewer.close">Close</button>
             </div>
             <div style="flex:1; display:flex; align-items:center; justify-content:center; overflow: hidden; position: relative;">
-                <div id="faxViewerStatus" style="position:absolute; top:12px; left:12px; background: rgba(0,0,0,0.6); color:#fff; padding:6px 10px; border-radius:6px; font-size:13px; display:none; z-index:1;">Loading...</div>
+                <div id="faxViewerStatus" style="position:absolute; top:12px; left:12px; background: rgba(0,0,0,0.6); color:#fff; padding:6px 10px; border-radius:6px; font-size:13px; display:none; z-index:1;" data-i18n="viewer.loading">Loading...</div>
                 <img id="faxViewerImage" alt="Fax" 
                      style="display:none; max-width:95vw; max-height:90vh; width:100%; height:100%; object-fit: contain; border: 1px solid #e2e8f0; border-radius: 8px;" />
                 <iframe id="faxViewerFrame" title="Fax Document" 
