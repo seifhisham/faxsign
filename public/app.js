@@ -40,6 +40,68 @@ async function loadTranslations(lang) {
     }
 }
 
+function toggleEditUser(userId) {
+    const el = document.getElementById(`edit-user-${userId}`);
+    if (!el) return;
+    const now = el.style.display === 'none' || el.style.display === '' ? 'block' : 'none';
+    el.style.display = now;
+}
+
+async function updateUserBasic(userId) {
+    const full = document.getElementById(`edit-full-${userId}`).value.trim();
+    const username = document.getElementById(`edit-username-${userId}`).value.trim();
+    const email = document.getElementById(`edit-email-${userId}`).value.trim();
+    if (!full && !username && !email) {
+        showMessage('usersList', t('admin.users.no_fields','Nothing to update'), 'error');
+        return;
+    }
+    try {
+        const res = await fetch(`/api/users/${userId}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${currentToken}`
+            },
+            body: JSON.stringify({ full_name: full, username, email })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            showMessage('usersList', t('admin.users.updated','User updated successfully'), 'success');
+            toggleEditUser(userId);
+            setTimeout(() => loadUsersForManagement(), 800);
+        } else {
+            showMessage('usersList', data.error || t('admin.users.update_failed','Failed to update user'), 'error');
+        }
+    } catch (e) {
+        showMessage('usersList', t('errors.network_retry','Network error. Please try again.'), 'error');
+    }
+}
+
+async function deleteUser(userId, name) {
+    if (currentUser && currentUser.id === userId) {
+        showMessage('usersList', t('admin.users.cannot_delete_self','You cannot delete your own account'), 'error');
+        return;
+    }
+    if (!confirm(`${t('admin.users.delete_confirm_prefix','Are you sure you want to delete user')} "${name}"? ${t('admin.users.delete_confirm_suffix','This action cannot be undone.')}`)) {
+        return;
+    }
+    try {
+        const res = await fetch(`/api/users/${userId}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${currentToken}` }
+        });
+        const data = await res.json();
+        if (res.ok) {
+            showMessage('usersList', t('admin.users.deleted','User deleted successfully'), 'success');
+            setTimeout(() => loadUsersForManagement(), 800);
+        } else {
+            showMessage('usersList', data.error || t('admin.users.delete_failed','Failed to delete user'), 'error');
+        }
+    } catch (e) {
+        showMessage('usersList', t('errors.network_retry','Network error. Please try again.'), 'error');
+    }
+}
+
 function applyTranslations() {
     // Static elements with data-i18n
     document.querySelectorAll('[data-i18n]').forEach(el => {
@@ -1491,7 +1553,31 @@ function displayUsersForManagement(users) {
                                 ${t('admin.users.update_department','Update Department')}
                             </button>
                         </div>
+                        <div style="display:flex; align-items:center; gap:10px; margin-top:6px;">
+                            <button type="button" class="edit-btn btn-sm" onclick="toggleEditUser(${user.id})">${t('admin.users.edit','Edit')}</button>
+                            <button type="button" class="delete-btn btn-sm" onclick="deleteUser(${user.id}, '${user.full_name.replace(/'/g, "\'")}')" ${isCurrentUser ? 'disabled' : ''}>${t('admin.users.delete','Delete')}</button>
+                        </div>
                     </div>
+                </div>
+            </div>
+            <div id="edit-user-${user.id}" class="edit-form" style="display:none; margin-top:12px;">
+                <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:10px;">
+                    <div>
+                        <label style="font-size:12px; color:#718096;">${t('admin.users.full_name','Full Name')}</label>
+                        <input type="text" id="edit-full-${user.id}" class="input" value="${user.full_name || ''}" placeholder="${t('admin.users.full_name_ph','Full name')}">
+                    </div>
+                    <div>
+                        <label style="font-size:12px; color:#718096;">${t('admin.users.username_label','Username')}</label>
+                        <input type="text" id="edit-username-${user.id}" class="input" value="${user.username || ''}" placeholder="${t('admin.users.username_ph','Username')}">
+                    </div>
+                    <div>
+                        <label style="font-size:12px; color:#718096;">${t('admin.users.email_label','Email')}</label>
+                        <input type="email" id="edit-email-${user.id}" class="input" value="${user.email || ''}" placeholder="${t('admin.users.email_ph','Email')}">
+                    </div>
+                </div>
+                <div style="display:flex; gap:8px; margin-top:10px;">
+                    <button type="button" class="btn btn-sm" onclick="updateUserBasic(${user.id})">${t('common.save','Save')}</button>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="toggleEditUser(${user.id})">${t('common.cancel','Cancel')}</button>
                 </div>
             </div>
         </div>`;

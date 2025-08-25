@@ -148,6 +148,22 @@
   "register.errors.password_mismatch": "Passwords do not match!",
   "register.errors.password_length": "Password must be at least 6 characters long!",
   "register.errors.registration_failed": "Registration failed. Please try again.",
-  "register.success.account_created": "Account created successfully! You can now login."
+  "register.success.account_created": "Account created successfully! You can now login.",
+  "admin.users.edit": "Edit",
+  "admin.users.delete": "Delete",
+  "admin.users.updated": "User updated successfully",
+  "admin.users.update_failed": "Failed to update user",
+  "admin.users.deleted": "User deleted successfully",
+  "admin.users.delete_failed": "Failed to delete user",
+  "admin.users.delete_confirm_prefix": "Are you sure you want to delete user",
+  "admin.users.delete_confirm_suffix": "This action cannot be undone.",
+  "admin.users.cannot_delete_self": "You cannot delete your own account",
+  "admin.users.no_fields": "Nothing to update",
+  "admin.users.full_name": "Full Name",
+  "admin.users.full_name_ph": "Full name",
+  "admin.users.username_label": "Username",
+  "admin.users.username_ph": "Username",
+  "admin.users.email_label": "Email",
+  "admin.users.email_ph": "Email"
 }
 

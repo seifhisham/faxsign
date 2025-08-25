@@ -152,5 +152,21 @@
   "register.errors.password_mismatch": "كلمتا المرور غير متطابقتين!",
   "register.errors.password_length": "يجب ألا تقل كلمة المرور عن 6 أحرف!",
   "register.errors.registration_failed": "فشل التسجيل. يرجى المحاولة مرة أخرى.",
-  "register.success.account_created": "تم إنشاء الحساب بنجاح! يمكنك الآن تسجيل الدخول."
+  "register.success.account_created": "تم إنشاء الحساب بنجاح! يمكنك الآن تسجيل الدخول.",
+  "admin.users.edit": "تعديل",
+  "admin.users.delete": "حذف",
+  "admin.users.updated": "تم تحديث المستخدم بنجاح",
+  "admin.users.update_failed": "فشل تحديث المستخدم",
+  "admin.users.deleted": "تم حذف المستخدم بنجاح",
+  "admin.users.delete_failed": "فشل حذف المستخدم",
+  "admin.users.delete_confirm_prefix": "هل أنت متأكد أنك تريد حذف المستخدم",
+  "admin.users.delete_confirm_suffix": "لا يمكن التراجع عن هذه العملية.",
+  "admin.users.cannot_delete_self": "لا يمكنك حذف حسابك",
+  "admin.users.no_fields": "لا يوجد شيء للتحديث",
+  "admin.users.full_name": "الاسم الكامل",
+  "admin.users.full_name_ph": "الاسم الكامل",
+  "admin.users.username_label": "اسم المستخدم",
+  "admin.users.username_ph": "اسم المستخدم",
+  "admin.users.email_label": "البريد الإلكتروني",
+  "admin.users.email_ph": "البريد الإلكتروني"
 }
