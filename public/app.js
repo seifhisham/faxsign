@@ -7,6 +7,9 @@ let signatureContext = null;
 let isDrawing = false;
 let currentWorkflowId = null;
 let availableDepartments = [];
+// Lightweight client-side state for pagination/filtering
+let FAXES_STATE = { items: [], page: 1, pageSize: 10, search: '', status: 'all' };
+let USERS_STATE = { items: [], page: 1, pageSize: 10, search: '', role: 'all' };
 
 // i18n state
 let I18N = { lang: 'en', dict: {}, requestId: 0, appliedRequestId: 0 };
@@ -654,7 +657,10 @@ async function loadFaxes() {
         
         if (response.ok) {
             const faxes = await response.json();
-            displayFaxes(faxes);
+            // store and render with pagination/filter
+            FAXES_STATE.items = Array.isArray(faxes) ? faxes : [];
+            if (FAXES_STATE.page < 1) FAXES_STATE.page = 1;
+            renderFaxesList();
         } else {
             const faxesList = document.getElementById('faxesList');
             let data = null;
@@ -673,8 +679,8 @@ async function loadFaxes() {
     }
 }
 
-function displayFaxes(faxes) {
-    const faxesList = document.getElementById('faxesList');
+function displayFaxes(faxes, targetId = 'faxesList') {
+    const faxesList = document.getElementById(targetId);
     
     if (faxes.length === 0) {
         faxesList.innerHTML = `<div class="loading">${t('list.empty','No faxes found')}</div>`;
@@ -793,9 +799,99 @@ function displayFaxes(faxes) {
     }
 
     faxesList.innerHTML = groupCards.join('');
+    // After rendering cards, load previews for visible faxes on this page
+    try { faxes.forEach(f => loadFaxPreview(f.id)); } catch (_) {}
+}
 
-    // After rendering cards, load previews for all faxes in all groups
-    faxes.forEach(f => loadFaxPreview(f.id));
+// Render faxes with controls (search/status + pager) and page slice
+function renderFaxesList() {
+    const root = document.getElementById('faxesList');
+    if (!root) return;
+    // Filtering
+    const q = (FAXES_STATE.search || '').toLowerCase();
+    const status = FAXES_STATE.status;
+    const filtered = FAXES_STATE.items.filter(f => {
+        const text = `${f.sender_name || ''} ${f.fax_number || ''} ${f.status || ''}`.toLowerCase();
+        const okText = !q || text.includes(q);
+        const okStatus = status === 'all' || (f.status || '').toLowerCase() === status.toLowerCase();
+        return okText && okStatus;
+    });
+    // Group faxes into cards
+    const groups = new Map();
+    for (const f of filtered) {
+        const key = f.group_id ? `g:${f.group_id}` : `id:${f.id}`;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(f);
+    }
+    const groupedArray = Array.from(groups.values());
+
+    // Paginate by groups
+    const total = groupedArray.length;
+    const pages = Math.max(1, Math.ceil(total / FAXES_STATE.pageSize));
+    if (FAXES_STATE.page > pages) FAXES_STATE.page = pages;
+    const start = (FAXES_STATE.page - 1) * FAXES_STATE.pageSize;
+    const pageGroups = groupedArray.slice(start, start + FAXES_STATE.pageSize);
+
+    // Flatten back for displayFaxes()
+    const pageItems = pageGroups.flat();
+
+    // Controls UI
+    const controls = `
+        <div class="list-controls" style="display:flex; gap:10px; align-items:center; justify-content:space-between; margin-bottom:10px;">
+            <div style="display:flex; gap:8px; align-items:center;">
+                <input id="faxesSearch" type="text" class="input" style="max-width:240px;" 
+                    placeholder="${t('search.placeholder','Search...')}" value="${FAXES_STATE.search}"
+                    oninput="setFaxesSearch(this.value)">
+                <select id="faxesStatus" class="input" onchange="setFaxesStatus(this.value)">
+                    <option value="all" ${status==='all'?'selected':''}>${t('filters.status_all','All statuses')}</option>
+                    <option value="pending" ${status==='pending'?'selected':''}>${t('status.pending','Pending')}</option>
+                    <option value="confirmed" ${status==='confirmed'?'selected':''}>${t('status.confirmed','Confirmed')}</option>
+                    <option value="rejected" ${status==='rejected'?'selected':''}>${t('status.rejected','Rejected')}</option>
+                </select>
+            </div>
+            <div style="display:flex; gap:6px; align-items:center;">
+                <button class="btn btn-secondary" onclick="setFaxesPage(${Math.max(1, FAXES_STATE.page - 1)})" ${FAXES_STATE.page===1?'disabled':''}>${t('pager.prev','Prev')}</button>
+                <span style="min-width:120px; text-align:center;">${t('pager.page','Page')} ${FAXES_STATE.page} / ${pages} • ${total} ${t('pager.items','items')}</span>
+                <button class="btn btn-secondary" onclick="setFaxesPage(${Math.min(pages, FAXES_STATE.page + 1)})" ${FAXES_STATE.page===pages?'disabled':''}>${t('pager.next','Next')}</button>
+            </div>
+        </div>
+        <div id="faxesPage"></div>
+        <div class="pager" style="display:flex; gap:6px; align-items:center; justify-content:center; margin-top:10px;">
+            <button class="btn btn-secondary" onclick="setFaxesPage(1)" ${FAXES_STATE.page===1?'disabled':''}>${t('pager.first','First')}</button>
+            <button class="btn btn-secondary" onclick="setFaxesPage(${Math.max(1, FAXES_STATE.page - 1)})" ${FAXES_STATE.page===1?'disabled':''}>${t('pager.prev','Prev')}</button>
+            <span>${t('pager.page','Page')} ${FAXES_STATE.page} / ${pages}</span>
+            <button class="btn btn-secondary" onclick="setFaxesPage(${Math.min(pages, FAXES_STATE.page + 1)})" ${FAXES_STATE.page===pages?'disabled':''}>${t('pager.next','Next')}</button>
+            <button class="btn btn-secondary" onclick="setFaxesPage(${pages})" ${FAXES_STATE.page===pages?'disabled':''}>${t('pager.last','Last')}</button>
+        </div>
+    `;
+    root.innerHTML = controls;
+    displayFaxes(pageItems, 'faxesPage');
+}
+
+function setFaxesSearch(val) { FAXES_STATE.search = val || ''; FAXES_STATE.page = 1; renderFaxesList(); }
+function setFaxesStatus(val) { FAXES_STATE.status = val || 'all'; FAXES_STATE.page = 1; renderFaxesList(); }
+function setFaxesPage(p) {
+    // Recompute groups based on current filters
+    const q = (FAXES_STATE.search || '').toLowerCase();
+    const status = FAXES_STATE.status;
+    const filtered = FAXES_STATE.items.filter(f => {
+        const text = `${f.sender_name || ''} ${f.fax_number || ''} ${f.status || ''}`.toLowerCase();
+        const okText = !q || text.includes(q);
+        const okStatus = status === 'all' || (f.status || '').toLowerCase() === status.toLowerCase();
+        return okText && okStatus;
+    });
+
+    const groups = new Map();
+    for (const f of filtered) {
+        const key = f.group_id ? `g:${f.group_id}` : `id:${f.id}`;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(f);
+    }
+    const groupedArray = Array.from(groups.values());
+
+    const pages = Math.max(1, Math.ceil(groupedArray.length / FAXES_STATE.pageSize));
+    FAXES_STATE.page = Math.min(Math.max(1, parseInt(p, 10) || 1), pages);
+    renderFaxesList();
 }
 
 // Update fax status (e.g., confirm)
@@ -1141,6 +1237,61 @@ function displayWorkflows(workflows) {
         </div>
     `).join('');
 }
+
+// Render users with controls (search/role + pager) and page slice
+function renderUsersList() {
+    const root = document.getElementById('usersList');
+    if (!root) return;
+    const q = (USERS_STATE.search || '').toLowerCase();
+    const role = USERS_STATE.role;
+    const filtered = USERS_STATE.items.filter(u => {
+        const text = `${u.full_name || ''} ${u.username || ''} ${u.email || ''}`.toLowerCase();
+        const okText = !q || text.includes(q);
+        const okRole = role === 'all' || (u.role || '').toLowerCase() === role.toLowerCase();
+        return okText && okRole;
+    });
+    const total = filtered.length;
+    const pages = Math.max(1, Math.ceil(total / USERS_STATE.pageSize));
+    if (USERS_STATE.page > pages) USERS_STATE.page = pages;
+    const start = (USERS_STATE.page - 1) * USERS_STATE.pageSize;
+    const pageItems = filtered.slice(start, start + USERS_STATE.pageSize);
+
+    const controls = `
+        <div class="list-controls" style="display:flex; gap:10px; align-items:center; justify-content:space-between; margin-bottom:10px;">
+            <div style="display:flex; gap:8px; align-items:center;">
+                <input id="usersSearch" type="text" class="input" style="max-width:240px;" 
+                    placeholder="${t('search.placeholder','Search...')}" value="${USERS_STATE.search}"
+                    oninput="setUsersSearch(this.value)">
+                <select id="usersRole" class="input" onchange="setUsersRole(this.value)">
+                    <option value="all" ${role==='all'?'selected':''}>${t('filters.role_all','All roles')}</option>
+                    <option value="user" ${role==='user'?'selected':''}>${t('roles.user','User')}</option>
+                    <option value="manager" ${role==='manager'?'selected':''}>${t('roles.manager','Manager')}</option>
+                    <option value="admin" ${role==='admin'?'selected':''}>${t('roles.admin','Admin')}</option>
+                    <option value="faxes" ${role==='faxes'?'selected':''}>${t('roles.faxes','Faxes')}</option>
+                </select>
+            </div>
+            <div style="display:flex; gap:6px; align-items:center;">
+                <button class="btn btn-secondary" onclick="setUsersPage(${Math.max(1, USERS_STATE.page - 1)})" ${USERS_STATE.page===1?'disabled':''}>${t('pager.prev','Prev')}</button>
+                <span style="min-width:120px; text-align:center;">${t('pager.page','Page')} ${USERS_STATE.page} / ${pages} • ${total} ${t('pager.items','items')}</span>
+                <button class="btn btn-secondary" onclick="setUsersPage(${Math.min(pages, USERS_STATE.page + 1)})" ${USERS_STATE.page===pages?'disabled':''}>${t('pager.next','Next')}</button>
+            </div>
+        </div>
+        <div id="usersPage"></div>
+        <div class="pager" style="display:flex; gap:6px; align-items:center; justify-content:center; margin-top:10px;">
+            <button class="btn btn-secondary" onclick="setUsersPage(1)" ${USERS_STATE.page===1?'disabled':''}>${t('pager.first','First')}</button>
+            <button class="btn btn-secondary" onclick="setUsersPage(${Math.max(1, USERS_STATE.page - 1)})" ${USERS_STATE.page===1?'disabled':''}>${t('pager.prev','Prev')}</button>
+            <span>${t('pager.page','Page')} ${USERS_STATE.page} / ${pages}</span>
+            <button class="btn btn-secondary" onclick="setUsersPage(${Math.min(pages, USERS_STATE.page + 1)})" ${USERS_STATE.page===pages?'disabled':''}>${t('pager.next','Next')}</button>
+            <button class="btn btn-secondary" onclick="setUsersPage(${pages})" ${USERS_STATE.page===pages?'disabled':''}>${t('pager.last','Last')}</button>
+        </div>
+    `;
+    root.innerHTML = controls;
+    displayUsersForManagement(pageItems, 'usersPage');
+}
+
+function setUsersSearch(val) { USERS_STATE.search = val || ''; USERS_STATE.page = 1; renderUsersList(); }
+function setUsersRole(val) { USERS_STATE.role = val || 'all'; USERS_STATE.page = 1; renderUsersList(); }
+function setUsersPage(p) { const pages = Math.max(1, Math.ceil((USERS_STATE.items.filter(u=>{const q=(USERS_STATE.search||'').toLowerCase();const role=USERS_STATE.role;const text=`${u.full_name||''} ${u.username||''} ${u.email||''}`.toLowerCase();const okText=!q||text.includes(q);const okRole=role==='all'||(u.role||'').toLowerCase()===role.toLowerCase();return okText&&okRole;})).length / USERS_STATE.pageSize)); USERS_STATE.page = Math.min(Math.max(1, parseInt(p,10)||1), pages); renderUsersList(); }
 
 async function viewWorkflowDetails(workflowId) {
     try {
@@ -1533,7 +1684,9 @@ async function loadUsersForManagement() {
         
         if (response.ok) {
             const users = await response.json();
-            displayUsersForManagement(users);
+            USERS_STATE.items = Array.isArray(users) ? users : [];
+            if (USERS_STATE.page < 1) USERS_STATE.page = 1;
+            renderUsersList();
         } else {
             console.error('Failed to load users');
         }
@@ -1542,8 +1695,8 @@ async function loadUsersForManagement() {
     }
 }
 
-function displayUsersForManagement(users) {
-    const usersList = document.getElementById('usersList');
+function displayUsersForManagement(users, targetId = 'usersList') {
+    const usersList = document.getElementById(targetId);
     if (usersList) {
         usersList.style.display = 'block';
     }
