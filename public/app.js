@@ -9,7 +9,7 @@ let currentWorkflowId = null;
 let availableDepartments = [];
 
 // i18n state
-let I18N = { lang: 'en', dict: {} };
+let I18N = { lang: 'en', dict: {}, requestId: 0, appliedRequestId: 0 };
 
 function t(key, fallback) {
     return (I18N.dict && I18N.dict[key]) || fallback || key;
@@ -17,9 +17,14 @@ function t(key, fallback) {
 
 async function loadTranslations(lang) {
     try {
+        // Guard against out-of-order responses
+        const reqId = ++I18N.requestId;
         const res = await fetch(`/i18n/${lang}.json`, { cache: 'no-store' });
         if (!res.ok) throw new Error('failed');
-        I18N.dict = await res.json();
+        const dict = await res.json();
+        // If a newer request started since this began, ignore this response
+        if (reqId !== I18N.requestId) return;
+        I18N.dict = dict;
         I18N.lang = lang;
         localStorage.setItem('lang', lang);
         // direction
@@ -32,10 +37,24 @@ async function loadTranslations(lang) {
         if (selLogin) selLogin.value = lang;
         const selRegister = document.getElementById('langSelectRegister');
         if (selRegister) selRegister.value = lang;
+        I18N.appliedRequestId = reqId;
         applyTranslations();
     } catch (_) {
         // fallback to English embedded keys if fetch fails
         I18N.lang = lang;
+        // Update document attributes and selector values even on failure
+        document.documentElement.lang = lang;
+        document.documentElement.dir = (lang === 'ar') ? 'rtl' : 'ltr';
+        const sel = document.getElementById('langSelect');
+        if (sel) sel.value = lang;
+        const selLogin = document.getElementById('langSelectLogin');
+        if (selLogin) selLogin.value = lang;
+        const selRegister = document.getElementById('langSelectRegister');
+        if (selRegister) selRegister.value = lang;
+        // If switching to English and we failed to load, clear dict so fallbacks (English in HTML) are used
+        if (lang === 'en') {
+            I18N.dict = {};
+        }
         applyTranslations();
     }
 }
@@ -127,6 +146,34 @@ document.addEventListener('DOMContentLoaded', function() {
     const saved = localStorage.getItem('lang');
     const initialLang = saved || (navigator.language && navigator.language.toLowerCase().startsWith('ar') ? 'ar' : 'en');
     loadTranslations(initialLang);
+    // Observe DOM changes and re-apply translations for dynamically inserted nodes
+    // Debounce to avoid excessive work during large updates
+    let i18nDebounceTimer = null;
+    const i18nDebounce = () => {
+        if (i18nDebounceTimer) clearTimeout(i18nDebounceTimer);
+        i18nDebounceTimer = setTimeout(() => {
+            applyTranslations();
+        }, 50);
+    };
+    try {
+        const mo = new MutationObserver((mutations) => {
+            for (const m of mutations) {
+                if (m.type === 'childList') {
+                    // If any added node or its subtree contains data-i18n, trigger re-translate
+                    for (const node of m.addedNodes) {
+                        if (!(node instanceof Element)) continue;
+                        if (node.hasAttribute && node.hasAttribute('data-i18n')) { i18nDebounce(); break; }
+                        if (node.querySelector && node.querySelector('[data-i18n]')) { i18nDebounce(); break; }
+                    }
+                } else if (m.type === 'attributes' && m.target && m.target.hasAttribute && m.target.hasAttribute('data-i18n')) {
+                    i18nDebounce();
+                }
+            }
+        });
+        mo.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-i18n'] });
+    } catch (e) {
+        // MutationObserver may fail in some environments; ignore
+    }
 
     // Check if user is already logged in
     const token = localStorage.getItem('token');
@@ -255,6 +302,11 @@ function setupEventListeners() {
             // After changing language, re-render lists to update dynamic strings
             if (currentToken) {
                 loadFaxes();
+                // Also refresh admin-managed lists so labels/buttons re-render in new language
+                if (currentUser && currentUser.role === 'admin') {
+                    loadUsersForManagement();
+                    loadDepartmentsForManagement();
+                }
             }
         });
     }

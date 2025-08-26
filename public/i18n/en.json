@@ -164,6 +164,10 @@
   "admin.users.username_label": "Username",
   "admin.users.username_ph": "Username",
   "admin.users.email_label": "Email",
-  "admin.users.email_ph": "Email"
+  "admin.users.email_ph": "Email",
+  "admin.users.department_label": "Department:",
+  "admin.users.no_department": "No department",
+  "admin.depts.edit": "Edit",
+  "admin.depts.delete": "Delete"
 }
 
